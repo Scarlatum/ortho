@@ -8,6 +8,7 @@ import { Mesh } from "../../mesh/mesh.model";
 // Shader modules 
 import shader from "../shaders/light.wgsl?raw";
 import { mat4 } from "gl-matrix";
+import { SceneInterface } from "../../interfaces/scene.interface";
 
 export class Light {
 
@@ -52,12 +53,13 @@ export class LightSources {
   public lights = new Set<Light>();
   public lightsBuffer: GPUBuffer;
   public views = new WeakMap<GPUTexture, GPUTextureView>();
+  public bindgroup: Nullable<GPUBindGroup> = null;
   private pipeline: GPURenderPipeline;
   private temporalTexture: GPUTexture;
   private temporalView: GPUTextureView;
   private bindgroupMap: WeakMap<Light, WeakMap<Drawable, GPUBindGroup>> = new WeakMap();
 
-  constructor() {
+  constructor(private scene: SceneInterface) {
 
     const module = device.createShaderModule({
       code: shader
@@ -92,6 +94,15 @@ export class LightSources {
     this.lights.add(source);
 
     source.observer.update();
+
+    this.bindgroup = device.createBindGroup({
+      label: "Scene Lighting Bindgroup",
+      layout: this.scene.pipeline.getBindGroupLayout(2),
+      entries: [
+        { binding: 0, resource: { buffer: this.lightsBuffer } },
+        { binding: 1, resource: this.views.get(source.texture)! },
+      ]
+    });
 
   }
 
