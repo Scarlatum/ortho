@@ -9,10 +9,8 @@ import { LightSources } from "../renderer/light/light.model";
 export abstract class SceneInterface {
 
   abstract actor: Actor;
-  // abstract uniforms: Record<string, GPUBuffer>;
-  // abstract batches: Array<Batcher>;
   abstract renderer: Renderer;
-  abstract pipeline: Nullable<GPURenderPipeline>;
+  abstract pipeline: GPURenderPipeline;
   abstract meshes: Map<any, Mesh>;
   abstract drawQueue: Array<Drawable>;
   abstract resourses: Record<string, URL>;

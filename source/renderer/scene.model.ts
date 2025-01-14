@@ -14,18 +14,17 @@ import * as utils from "./renderer.utils";
 
 export class Scene extends SceneInterface {
 
-
   pipeline: GPURenderPipeline;
-  bingGroupLayout: GPUBindGroupLayout;
   
   private passDescriptor = Scene.baseColorAttacment();
   private bindgroupMap = new WeakMap<Drawable, GPUBindGroup>();
-
+  
   public actor: Actor;
   public drawQueue: Drawable[] = Array();
   public onpass: Set<Function> = new Set();
   public meshes = new Map<any, Mesh>();
   public lightSources: LightSources;
+  public setupBindgroup: GPUBindGroup;
 
   constructor(
     public renderer: Renderer,
@@ -38,7 +37,7 @@ export class Scene extends SceneInterface {
     const aspect = window.innerWidth / window.innerHeight;
 
     this.actor = new Actor(new Camera(aspect));
-    this.lightSources = new LightSources();
+    this.lightSources = new LightSources(this);
 
     this.renderer.shaderBuilder.applyMaterials(
       this.materials.map(x => this.renderer.materials.register(x))
@@ -47,9 +46,60 @@ export class Scene extends SceneInterface {
     this.pipeline = utils.createBasePipeline(renderer.device, ShaderBuilder.compile(
       this.renderer.shaderBuilder,
       window.device
-    ), { multisample: { count: this.renderer.msaa } });
+    ), { multisample: { count: this.renderer.msaa }, label: "Scene Pipiline Test", layout: device.createPipelineLayout({
+      bindGroupLayouts: [
+        device.createBindGroupLayout({
+          entries: [
+            {
+              binding: 0,
+              visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX,
+              buffer: { type: "uniform" }
+            },
+            {
+              binding: 1,
+              visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX,
+              buffer: { type: "uniform" }
+            },
+            {
+              binding: 2,
+              visibility: GPUShaderStage.FRAGMENT,
+              sampler: { type: "filtering" }
+            },
+            {
+              binding: 3,
+              visibility: GPUShaderStage.FRAGMENT,
+              sampler: { type: "comparison" }
+            },
+          ]
+        }),
+        device.createBindGroupLayout({
+          label: "Scene Lighting Layout",
+          entries: [
+            { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
+            { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { viewDimension: "2d", sampleType: "float" } }
+          ]
+        }),
+        device.createBindGroupLayout({
+          label: `Scene Bindgroup Layout`,
+           entries: [
+            { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
+            { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { viewDimension: "2d", sampleType: "depth" } },
+          ]
+        })
+      ]
+    }) });
 
-    this.bingGroupLayout = this.pipeline!.getBindGroupLayout(0);
+    this.setupBindgroup = device.createBindGroup({
+      label: "Scene Setup Bindgroup",
+      layout: this.pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: this.renderer.baseUniformBuffer } },
+        { binding: 1, resource: { buffer: this.actor.camera.buffer } },
+        { binding: 2, resource: this.renderer.sampler },
+        { binding: 3, resource: this.renderer.compSampler }
+      ]
+    });
+
     this.renderer.onResizeHooks.add(() => this.onScreenChange());
 
   }
@@ -73,36 +123,6 @@ export class Scene extends SceneInterface {
       ]
     };
   }
-
-  // protected async makePlane(customMaterial ?: ProceduredMaterial) {
-
-  //   const plane = new Mesh({
-  //     id: Symbol("plane mesh"),
-  //     material: customMaterial ?? null,
-  //     vertexes: new Float32Array(planeVertexes),
-  //     texture: utils.createBaseTexture(window.device),
-  //     uv: new Float32Array([
-  //       1, 0,
-  //       0, 0,
-  //       0, 1,
-  //       1, 1,
-  //       1, 0,
-  //       0, 1,
-  //     ]),
-  //     normals: null,
-  //   });
-
-  //   const model = DOMMatrix.fromFloat32Array(new Float32Array(plane.model));
-
-  //   model.rotateAxisAngleSelf(1, 0, 0, 90);
-  //   model.scaleSelf(Camera.FAR_POINT);
-  //   model.translateSelf(0, 0, -0.5);
-
-  //   plane.writeModel = model.toFloat32Array();
-
-  //   this.drawQueue.push(plane);
-
-  // }
 
   public updatePassDescriptor(query?: GPUQuerySet) {
 
@@ -145,28 +165,26 @@ export class Scene extends SceneInterface {
     }
   }
 
-  createRenderBundle(x: Drawable, bindgroup: GPUBindGroup) {
+  // createRenderBundle(x: Drawable, bindgroup: GPUBindGroup) {
 
-    const bundle = window.device.createRenderBundleEncoder({
-      colorFormats: [ Renderer.RENDER_FORMAT ],
-      depthStencilFormat: 'depth24plus',
-    });
+  //   const bundle = window.device.createRenderBundleEncoder({
+  //     colorFormats: [ Renderer.RENDER_FORMAT ],
+  //     depthStencilFormat: 'depth24plus',
+  //   });
 
-    bundle.setPipeline(this.pipeline);
-    bundle.setBindGroup(0, bindgroup);
-    bundle.setVertexBuffer(0, x.vertexBuffer);
-    bundle.draw(
-      x.vertexBuffer.size / Float32Array.BYTES_PER_ELEMENT / Mesh.VERTEX_SIZE,
-      x.instances
-    );
+  //   bundle.setPipeline(this.pipeline);
+  //   bundle.setBindGroup(0, bindgroup);
+  //   bundle.setVertexBuffer(0, x.vertexBuffer);
+  //   bundle.draw(
+  //     x.vertexBuffer.size / Float32Array.BYTES_PER_ELEMENT / Mesh.VERTEX_SIZE,
+  //     x.instances
+  //   );
 
-    return bundle.finish();
+  //   return bundle.finish();
 
-  }
+  // }
 
   pass(encoder: GPUCommandEncoder, qs?: GPUQuerySet): void {
-
-    if (!this.pipeline) throw Error();
 
     this.actor.update();
 
@@ -192,28 +210,25 @@ export class Scene extends SceneInterface {
 
         if (x.drop) continue;
 
+        pass.setBindGroup(0, this.setupBindgroup);
+        pass.setBindGroup(2, this.lightSources.bindgroup);
+
         if ( this.bindgroupMap.has(x) ) {
-          pass.setBindGroup(0, this.bindgroupMap.get(x)!);
+          pass.setBindGroup(1, this.bindgroupMap.get(x)!);
         } else {
 
-          const [ first ] =  this.lightSources.lights;
+          const uuid = crypto.randomUUID();
 
           const bindgroup = device.createBindGroup({
-            label: "Scene Bindgroup",
-            layout: this.bingGroupLayout,
+            label: `Scene Bindgroup :: ${ uuid }`,
+            layout: this.pipeline.getBindGroupLayout(1),
             entries: [
-              { binding: 999, resource: { buffer: this.renderer.baseUniformBuffer } },
-              { binding: 998, resource: { buffer: this.actor.camera.buffer } },
-              { binding: 997, resource: { buffer: x.tranformationBuffer } },
-              { binding: 996, resource: this.renderer.sampler },
-              { binding: 995, resource: x.texture.createView() },
-              { binding: 994, resource: { buffer: this.lightSources.lightsBuffer } },
-              { binding: 993, resource: this.lightSources.views.get(first.texture)! },
-              { binding: 992, resource: this.renderer.compSampler }
+              { binding: 0, resource: { buffer: x.tranformationBuffer } },
+              { binding: 1, resource: x.texture.createView() },
             ]
           });
 
-          pass.setBindGroup(0, this.bindgroupMap
+          pass.setBindGroup(1, this.bindgroupMap
             .set(x, bindgroup)
             .get(x)!
           );

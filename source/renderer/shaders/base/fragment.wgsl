@@ -6,7 +6,7 @@
   var color   = vec4f(0,0,0,1);
   let globalDistance = abs(distance(in.globalCoords.xyz, params.globalPosition.xyz)) / 600;
 
-  let texel = textureSample(meshTexture, textureSampler, in.textureUV);
+  let texel = textureSample(texture, textureSampler, in.textureUV);
 
   let visibility = textureSampleCompare(
     light_depth, shadowSampler, 

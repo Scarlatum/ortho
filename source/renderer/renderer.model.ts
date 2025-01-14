@@ -296,14 +296,14 @@ export class Renderer {
 
       }
 
-      const l = Array.from(this.currentScene.lightSources.lights);
+      // const l = Array.from(this.currentScene.lightSources.lights);
 
       { // Отладочные проходы
-        if ( import.meta.env.DEV ) this.preview.show(
-          this.context.getCurrentTexture(),
-          // this.depthBuffer
-          l[0].texture
-        );
+        // if ( import.meta.env.DEV ) this.preview.show(
+        //   this.context.getCurrentTexture(),
+        //   // this.depthBuffer
+        //   l[0].texture
+        // );
       }
 
     }
