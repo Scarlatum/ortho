@@ -138,9 +138,9 @@ export class LightSources {
 
         pass.setVertexBuffer(0, x.vertexBuffer);
 
-        const map = this.bindgroupMap.get(light);
+        let map = this.bindgroupMap.get(light);
 
-        if ( !map ) this.bindgroupMap.set(light, new WeakMap());
+        if ( !map ) this.bindgroupMap.set(light, map = new WeakMap());
 
         if ( map?.has(x) ) {
 
