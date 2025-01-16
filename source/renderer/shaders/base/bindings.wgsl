@@ -7,4 +7,5 @@
 @group(1) @binding(1) var texture: texture_2d<f32>;
 
 @group(2) @binding(0) var<storage, read> lights: array<ViewData>;
-@group(2) @binding(1) var light_depth: texture_depth_2d;
+@group(2) @binding(1) var light_dynamic: texture_depth_2d;
+@group(2) @binding(2) var light_static: texture_depth_2d;

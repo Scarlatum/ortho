@@ -128,21 +128,21 @@ export async function generateAtlasTexture(device: GPUDevice, textures: Array<GP
 
 }
 
-export function createBaseFragmentTarget(): GPUColorTargetState {
+export function createBaseFragmentTarget(format: GPUTextureFormat): GPUColorTargetState {
   return {
-    format: Renderer.RENDER_FORMAT,
-    blend: {
-      alpha: {
-        srcFactor: "src-alpha",
-        dstFactor: "one-minus-src-alpha",
-        operation: "add"
-      },
-      color: {
-        srcFactor: "src-alpha",
-        dstFactor: "one-minus-src-alpha",
-        operation: "add"
-      }
-    }
+    format: format,
+    // blend: {
+    //   alpha: {
+    //     srcFactor: "src-alpha",
+    //     dstFactor: "one-minus-src-alpha",
+    //     operation: "add"
+    //   },
+    //   color: {
+    //     srcFactor: "src-alpha",
+    //     dstFactor: "one-minus-src-alpha",
+    //     operation: "add"
+    //   }
+    // }
   };
 }
 
@@ -151,6 +151,7 @@ export function createBasePipeline(
   shaders: ReturnType<typeof ShaderBuilder.compile>,
   overrides: Partial<GPURenderPipelineDescriptor> = Object(),
   constants?: Record<string, number>,
+  renderFormat: GPUTextureFormat = Renderer.RENDER_FORMAT,
 ): GPURenderPipeline {
 
   const vertex: GPUVertexState = {
@@ -162,7 +163,7 @@ export function createBasePipeline(
   const fragment: GPUFragmentState = {
     entryPoint: "fragmentKernel",
     module: shaders.fragment,
-    targets: [ createBaseFragmentTarget() ],
+    targets: [ createBaseFragmentTarget(renderFormat) ],
   }
 
   if ( constants ) fragment.constants = vertex.constants = constants;

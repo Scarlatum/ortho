@@ -13,23 +13,27 @@ import { SceneInterface } from "../../interfaces/scene.interface";
 export class Light {
 
   static readonly defaultOrthoParams = {
-    left: -50 * 5,
-    right: 50 * 5,
-    bottom: -50 * 5,
-    top: 50 * 5,
-    near: -1000,
-    far: 300,
+    left    : -50 * 5,
+    right   :  50 * 5,
+    bottom  : -50 * 5,
+    top     :  50 * 5,
+    near    : -800,
+    far     :  300,
   };
 
-  static RESOLUTION = 1024 * 4;
+  static RESOLUTION = 1024 * 3;
   static readonly shadowMapResolution = {
     width: Light.RESOLUTION,
     height: Light.RESOLUTION
   };
 
   public texture: GPUTexture;
+  public static: boolean = false;
 
-  constructor(public observer: Observer, ortho = Light.defaultOrthoParams) {
+  constructor(
+    public observer: Observer, 
+    ortho = Light.defaultOrthoParams
+  ) {
 
     this.texture = device.createTexture({
       format: Renderer.DEPTH_FORMAT,
@@ -50,6 +54,7 @@ export class Light {
 
 export class LightSources {
 
+  public static_queue = new Set<Light>();
   public lights = new Set<Light>();
   public lightsBuffer: GPUBuffer;
   public views = new WeakMap<GPUTexture, GPUTextureView>();
@@ -65,14 +70,16 @@ export class LightSources {
       code: shader
     });
 
+    const format: GPUTextureFormat = "r8unorm";
+
     this.pipeline = utils.createBasePipeline(device, {
       fragment: module,
       vertex: module,
-    });
+    }, { label: "Light Sourses Pipeline" }, undefined, format);
 
     this.temporalTexture = device.createTexture({
       label: "TEMP TEXTURE",
-      format: Renderer.RENDER_FORMAT,
+      format: format,
       size: Light.shadowMapResolution,
       usage: GPUTextureUsage.RENDER_ATTACHMENT,
     });
@@ -80,8 +87,7 @@ export class LightSources {
     this.temporalView = this.temporalTexture.createView();
 
     this.lightsBuffer = device.createBuffer({
-      // 2 of 4x4 f32 matrix
-      size: Math.max(this.lights.size, 1) * Observer.BUFFER_TYPE.BYTES_PER_ELEMENT * Observer.BUFFER_SIZE,
+      size: Observer.BUFFER_TYPE.BYTES_PER_ELEMENT * Observer.BUFFER_SIZE * 2,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
     });
 
@@ -90,19 +96,34 @@ export class LightSources {
   public add(source: Light) {
 
     this.views.set(source.texture, source.texture.createView());
-
     this.lights.add(source);
 
-    source.observer.update();
+    if ( this.lights.size < 2 ) return;
 
-    this.bindgroup = device.createBindGroup({
+    let dynamic_light: Nullable<Light> = null;
+    let static_light: Nullable<Light> = null;
+
+    for ( const x of this.lights ) {
+
+      if (dynamic_light && static_light) break;
+
+      if ( x.static === false ) dynamic_light = x;
+      
+      if ( x.static === true ) this.static_queue.add(static_light = x);
+      
+    }
+
+    if ( dynamic_light && static_light ) this.bindgroup = device.createBindGroup({
       label: "Scene Lighting Bindgroup",
       layout: this.scene.pipeline.getBindGroupLayout(2),
       entries: [
         { binding: 0, resource: { buffer: this.lightsBuffer } },
-        { binding: 1, resource: this.views.get(source.texture)! },
+        { binding: 1, resource: this.views.get(dynamic_light.texture)! },
+        { binding: 2, resource: this.views.get(static_light.texture)! }
       ]
     });
+
+    else throw Error();
 
   }
 
@@ -111,14 +132,24 @@ export class LightSources {
     drawQueue: Array<Drawable>,
   ) {
 
+    if ( drawQueue.length === 0 ) return;
+
     let layout = this.pipeline.getBindGroupLayout(0);
     let index = 0;
 
     for (const light of this.lights) {
 
+      if ( light.static ) {
+
+        if ( this.static_queue.has(light) === false ) continue;
+        
+        this.static_queue.delete(light);
+
+      }
+
       encoder.copyBufferToBuffer(
         light.observer.buffer, 0,
-        this.lightsBuffer, Observer.BUFFER_TYPE.BYTES_PER_ELEMENT * Observer.BUFFER_SIZE * index++,
+        this.lightsBuffer, Observer.BUFFER_TYPE.BYTES_PER_ELEMENT * Observer.BUFFER_SIZE * index,
         light.observer.buffer.size
       );
 
@@ -126,7 +157,7 @@ export class LightSources {
         colorAttachments: [
           {
             loadOp: "clear",
-            storeOp: "store",
+            storeOp: "discard",
             clearValue: [ 1, 1, 1, 1 ],
             view: this.temporalView,
           }
@@ -141,9 +172,11 @@ export class LightSources {
 
       pass.setPipeline(this.pipeline);
 
-      for (const x of drawQueue) {
+      const q = drawQueue.filter(draw => draw.static === light.static);
 
-        if (x.shadowCast === false) continue;
+      for (const x of q) {
+
+        if ( x.shadowCast === false ) continue;
 
         const vertexCount = x.vertexBuffer.size / Float32Array.BYTES_PER_ELEMENT / Mesh.VERTEX_SIZE;
 
@@ -153,7 +186,7 @@ export class LightSources {
 
         if ( !map ) this.bindgroupMap.set(light, map = new WeakMap());
 
-        if ( map?.has(x) ) {
+        if ( map.has(x) ) {
 
           pass.setBindGroup(0, map.get(x)!);
 
@@ -163,23 +196,28 @@ export class LightSources {
             layout: layout,
             label: "Scene Bindgroup",
             entries: [
-              { binding: 0, resource: { buffer: light.observer.buffer } },
+              { binding: 0, resource: { 
+                buffer: light.observer.buffer, 
+              } },
               { binding: 1, resource: { buffer: x.tranformationBuffer } },
             ]
           });
 
-          map!.set(x, bindgroup);
+
+          map.set(x, bindgroup);
 
           pass.setBindGroup(0, bindgroup);
 
         }
         
+
         pass.draw(vertexCount, x.instances);
 
       }
 
       pass.end();
 
+      index += 1;
 
     }
   }

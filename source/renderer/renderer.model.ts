@@ -141,7 +141,7 @@ export class Renderer {
     globalThis.adapter = adapter;
     globalThis.context = context;
 
-    return [ adapter, device, context ];
+    return [ adapter, device, context ] as const;
 
   }
 
@@ -266,21 +266,25 @@ export class Renderer {
 
       if (frameCallback) frameCallback(this.info);
 
+      { // TODO: Проход карт теней
+
+        const encoder = this.device.createCommandEncoder({
+          label: "shadow pass encoder"
+        });
+
+        this.currentScene.lightSources.pass(encoder, this.currentScene.drawQueue);
+
+        this.device.queue.submit([ encoder.finish() ]);
+
+      }
+
       { // Основной проход
 
         const encoder = this.device.createCommandEncoder({
           label: "main pass encoder"
         });
 
-        // const querySet = Renderer.TIME_MEASURE 
-        //   ? device.createQuerySet({ count: 2, type: "timestamp" }) 
-        //   : undefined
-
         this.currentScene.pass(encoder);
-
-        // if ( Renderer.TIME_MEASURE && querySet ) {
-        //   this.measures.updateQueryBuffers(querySet!);
-        // }
 
         this.device.queue.submit([ encoder.finish() ]);
 

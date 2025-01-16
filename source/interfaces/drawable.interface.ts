@@ -9,4 +9,5 @@ export abstract class Drawable {
   abstract texture: GPUTexture;
   abstract shadowCast: boolean;
   abstract shadowRecieve: boolean;
+  abstract static: boolean;
 }

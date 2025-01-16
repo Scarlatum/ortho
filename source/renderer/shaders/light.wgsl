@@ -36,10 +36,10 @@ struct ViewData {
 @fragment fn fragmentKernel(
   @builtin(front_facing) face: bool,
   in: VertexOut,
-) -> @location(0) vec4f {
+) -> @location(0) f32 {
 
   if ( face ) { discard; }
 
-  return vec4f(1);
+  return 1.0;
 
 }

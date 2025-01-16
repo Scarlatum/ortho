@@ -28,6 +28,7 @@ export interface IMesh {
 export interface ShadowPoperty {
   recieve: boolean;
   cast: boolean;
+  static: boolean;
 };
 
 export class Mesh extends Drawable implements IMesh {
@@ -46,6 +47,7 @@ export class Mesh extends Drawable implements IMesh {
   public texture: GPUTexture;
   override shadowCast: boolean = false;
   override shadowRecieve: boolean = false;
+  override static: boolean = true;
 
   public vertexes: Float32Array = new Float32Array();
   public vbo: Float32Array = new Float32Array();
@@ -86,6 +88,7 @@ export class Mesh extends Drawable implements IMesh {
 
     this.shadowCast = shadowprop.cast;
     this.shadowRecieve = shadowprop.recieve;
+    this.static = shadowprop.static;
 
     Mesh.constructVertexData(this, this.vbo, this.vertexCount);
 

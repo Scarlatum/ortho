@@ -83,7 +83,10 @@ export class Scene extends SceneInterface {
           label: `Scene Bindgroup Layout`,
            entries: [
             { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
+            // Динамическая карта теней
             { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { viewDimension: "2d", sampleType: "depth" } },
+            // Статическая карта теней
+            { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { viewDimension: "2d", sampleType: "depth" } },
           ]
         })
       ]
@@ -192,10 +195,6 @@ export class Scene extends SceneInterface {
 
     { // TODO: Предварительный проход для карты глубины и нормалей
 
-    }
-
-    { // TODO: Проход карт теней
-      this.lightSources.pass(encoder, this.drawQueue);
     }
 
     { // Render pass

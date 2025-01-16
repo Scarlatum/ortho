@@ -24,7 +24,9 @@ const rotationMask = mat4x4<f32>(
   let x: mat4x4f = transforms[instance];
 
   let transf = view.perspective * view.camera * x;
-  let transl = lights[0].perspective * lights[0].camera * x * vec4f(vertexData, 1);
+  
+  let light_dyn     = lights[0].perspective * lights[0].camera * x * vec4f(vertexData, 1);
+  let light_static  = lights[1].perspective * lights[1].camera * x * vec4f(vertexData, 1);
 
   // Тут происходит некая дрянь просто из-за того, что я ленивый ублюдок
   // который не захотел передавать матрицы отдельно для каждого вида трансформаций
@@ -49,9 +51,16 @@ const rotationMask = mat4x4<f32>(
   result.norm           = vec4f(normalize(rotationMatrix * normals), 1);
   result.textureUV      = uv;
   result.globalCoords   = x * vec4f(vertexData, 1);
-  result.lightSpace     = vec4(
-    transl.xy * vec2f(0.5, -0.5) + vec2f(0.5), 
-    transl.z, 
+
+  result.lightSpaceDyn  = vec4(
+    light_dyn.xy * vec2f(0.5, -0.5) + vec2f(0.5), 
+    light_dyn.z, 
+    1
+  );
+
+  result.lightSpaceStatic = vec4(
+    light_static.xy * vec2f(0.5, -0.5) + vec2f(0.5), 
+    light_static.z, 
     1
   );
 
