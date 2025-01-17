@@ -1,5 +1,3 @@
-import MaterialMatcher from "./mat.wgsl?raw";
-
 import { ProceduredMaterial } from "../mesh.material";
 
 interface ShaderCode {
@@ -20,7 +18,6 @@ interface ShaderParams extends Partial<OptionalParams> {
 
 export class ShaderBuilder {
 
-  private materialMap: string = MaterialMatcher;
   private code: ShaderCode = Object();
 
   constructor(private params: ShaderParams) {
@@ -45,7 +42,7 @@ export class ShaderBuilder {
   applyMaterials(material: Array<ProceduredMaterial>): ShaderBuilder {
 
     material.forEach(x => {
-      this.materialMap = this.materialMap.replaceAll("// #MATERIAL", /* wgsl */`
+      this.code.fragment = this.code.fragment.replaceAll("// #MATERIAL", /* wgsl */`
         case ${x.id}u {
           ${x.code}
         }
@@ -59,7 +56,7 @@ export class ShaderBuilder {
 
   static compile(builder: ShaderBuilder, device: GPUDevice) {
 
-    const fs = builder.code.fragment + "\n" + builder.materialMap;
+    const fs = builder.code.fragment;
     const vs = builder.code.vertex;
 
     return {
