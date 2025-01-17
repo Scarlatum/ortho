@@ -27,13 +27,13 @@ export class Creation<State, const Instances extends number> {
     public state: Nullable<State> = null
   ) {
 
-    const data: IMesh = {
-      id: Symbol("mesh uniq id"),
-      material: material,
-      vertexes: Wave.constructBuffer(geometry, Wave.BufferType.Vertex),
-      texture: texture,
-      uv: Wave.constructBuffer(geometry, Wave.BufferType.UV),
-      normals: Wave.constructBuffer(geometry, Wave.BufferType.Normal),
+    const data: DereferencedObjectValues<IMesh> = {
+      id        : Symbol("mesh uniq id"),
+      material  : material,
+      vertexes  : Wave.constructBuffer(geometry, Wave.BufferType.Vertex),
+      texture   : texture,
+      uv        : Wave.constructBuffer(geometry, Wave.BufferType.UV),
+      normals   : Wave.constructBuffer(geometry, Wave.BufferType.Normal),
     };
 
     // ? Так как InstancesMesh наследуется от Mesh, то и в ручном касте типа тут особой потребности нет
