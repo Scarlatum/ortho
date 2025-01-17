@@ -76,14 +76,16 @@ export class Scene extends SceneInterface {
           label: "Scene Lighting Layout",
           entries: [
             { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
-            { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { viewDimension: "2d", sampleType: "float" } }
+            { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { viewDimension: "2d", sampleType: "float" } },
+            { binding: 2, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } }
           ]
         }),
         device.createBindGroupLayout({
-          label: `Scene Bindgroup Layout`,
+          label: `Scene Layout`,
            entries: [
             { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
             { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { viewDimension: "2d", sampleType: "depth" } },
+            { binding: 2, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } }
           ]
         })
       ]
@@ -225,6 +227,7 @@ export class Scene extends SceneInterface {
             entries: [
               { binding: 0, resource: { buffer: x.tranformationBuffer } },
               { binding: 1, resource: x.texture.createView() },
+              { binding: 2, resource: { buffer: x.instanceParamBuffer } },
             ]
           });
 
