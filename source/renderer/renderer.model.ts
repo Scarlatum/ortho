@@ -14,12 +14,7 @@ import s_vertex from "./shaders/base/vertex.wgsl?raw";
 import s_fragment from "./shaders/base/fragment.wgsl?raw";
 
 // Previews
-import { TexturePreview } from "../renderer/preview";
-
-interface RendererInfo {
-  currentFrame: number;
-  frameRate: number;
-}
+// import { TexturePreview } from "../renderer/preview";
 
 export const enum MSAA { NONE = 1, X4 = 4, X8 = 8, X16 = 16 };
 
@@ -29,10 +24,10 @@ export class Renderer {
   static readonly RENDER_FORMAT: GPUTextureFormat = navigator.gpu.getPreferredCanvasFormat();
   static readonly TIME_MEASURE = import.meta.env.DEV;
 
-  private preview: TexturePreview;
+  // private preview: TexturePreview;
   public materials = new MaterialRepository();
 
-  public info: RendererInfo = {
+  public info = {
     currentFrame: 0,
     frameRate: 0,
   };
@@ -65,8 +60,8 @@ export class Renderer {
 
     this.compSampler = device.createSampler({
       compare: "less",
-      minFilter: "linear",
-      magFilter: "linear",
+      minFilter: "nearest",
+      magFilter: "nearest",
     });
 
     context.configure({
@@ -99,7 +94,7 @@ export class Renderer {
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
-    this.preview = new TexturePreview(this);
+    // this.preview = new TexturePreview();
 
     this.onResizeHooks.add(() => this.onResize());
 
@@ -141,7 +136,7 @@ export class Renderer {
     globalThis.adapter = adapter;
     globalThis.context = context;
 
-    return [ adapter, device, context ];
+    return [ adapter, device, context ] as const;
 
   }
 
@@ -246,7 +241,7 @@ export class Renderer {
 
   }
 
-  public render(frameCallback: Nullable<(info: RendererInfo) => void>) {
+  public render(frameCallback: Nullable<(info: Renderer['info']) => void>) {
 
     this.info.currentFrame++;
     
