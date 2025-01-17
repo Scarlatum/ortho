@@ -7,21 +7,27 @@ import { Mesh } from "../../mesh/mesh.model";
 
 // Shader modules 
 import shader from "../shaders/light.wgsl?raw";
-import { mat4 } from "gl-matrix";
+import { mat4, vec3 } from "gl-matrix";
 import { SceneInterface } from "../../interfaces/scene.interface";
 
+// TODO: Начать делать каскадные теневые карты.
 export class Light {
 
   static readonly defaultOrthoParams = {
-    left: -50 * 5,
-    right: 50 * 5,
-    bottom: -50 * 5,
-    top: 50 * 5,
-    near: -1000,
-    far: 300,
+    left    : -50 * 6,
+    right   :  50 * 6,
+    bottom  : -50 * 6,
+    top     :  50 * 6,
+    near    : -1000,
+    far     :  300,
   };
 
-  static RESOLUTION = 1024 * 4;
+  // ! DirectX12 частенько любит выставлять ResourceBarrier между проходами, 
+  // ! и если не повезёт, то он может отъесть значительную часть кадра при больших объёмах текстур.
+  // ! Скорее всего, не смотря на моё желание обойтись одной картой теней в 4-8к расширением для всего окружения,
+  // ! Direct заставит меня делать каскадную карту теней.
+  // ? Как вариант делать проходы с тенями асинхронными, но это нужно проверять на итог по визуалу.
+  static readonly RESOLUTION = 1024 * 4;
   static readonly shadowMapResolution = {
     width: Light.RESOLUTION,
     height: Light.RESOLUTION
@@ -58,6 +64,7 @@ export class LightSources {
   private temporalTexture: GPUTexture;
   private temporalView: GPUTextureView;
   private bindgroupMap: WeakMap<Light, WeakMap<Drawable, GPUBindGroup>> = new WeakMap();
+  private lightDirectionBuffer: GPUBuffer;
 
   constructor(private scene: SceneInterface) {
 
@@ -85,6 +92,11 @@ export class LightSources {
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
     });
 
+    this.lightDirectionBuffer = device.createBuffer({
+      size: 3 * Float32Array.BYTES_PER_ELEMENT,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+    });
+
   }
 
   public add(source: Light) {
@@ -101,6 +113,7 @@ export class LightSources {
       entries: [
         { binding: 0, resource: { buffer: this.lightsBuffer } },
         { binding: 1, resource: this.views.get(source.texture)! },
+        { binding: 2, resource: { buffer: this.lightDirectionBuffer } },
       ]
     });
 
@@ -116,6 +129,11 @@ export class LightSources {
 
     for (const light of this.lights) {
 
+      if ( index === 0 ) device.queue.writeBuffer(
+        this.lightDirectionBuffer, 0, 
+        new Float32Array(vec3.normalize([0,0,0], vec3.sub([0,0,0], light.observer.position, light.observer.target)))
+      );
+
       encoder.copyBufferToBuffer(
         light.observer.buffer, 0,
         this.lightsBuffer, Observer.BUFFER_TYPE.BYTES_PER_ELEMENT * Observer.BUFFER_SIZE * index++,
@@ -126,7 +144,7 @@ export class LightSources {
         colorAttachments: [
           {
             loadOp: "clear",
-            storeOp: "store",
+            storeOp: "discard",
             clearValue: [ 1, 1, 1, 1 ],
             view: this.temporalView,
           }
