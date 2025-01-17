@@ -49,12 +49,10 @@ fn fbm(input: vec2<f32>) -> f32 {
 
 fn warp(
 	frag_coord: vec2<f32>
-) -> vec4<f32> {
+) -> f32 {
 
 	let st: vec2f = frag_coord / vec2f(10);
          
-  var color = vec3(0.0);
-
   var q = vec2(0.0);
     	q.x = fbm(st);
     	q.y = fbm(st + vec2(1.0));
@@ -64,13 +62,7 @@ fn warp(
 		  r.x = fbm(st + 1.0*q + vec2(1.7,9.2) + 0.150 * (params.tick * 0.005));
 
   let f = fbm(st + r);
-
-  color = mix(
-    vec3(1.0),
-    vec3(0.2,0.2,0.3),
-    0.5,
-  );
     
-  return vec4((f + 0.6*f*f + 0.5*f) * color, 1.0);
+  return (f + 0.6*f*f + 0.5*f);
 
 }
