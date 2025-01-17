@@ -10,7 +10,7 @@ export class TexturePreview {
   protected uniformBuffer: GPUBuffer = Object();
   protected vertexBuffer: GPUBuffer;
 
-  constructor(private renderer: Renderer) {
+  constructor() {
 
     this.shaderModule = device.createShaderModule({
       code: shader,
