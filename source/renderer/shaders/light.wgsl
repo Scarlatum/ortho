@@ -12,13 +12,12 @@ struct ViewData {
 
 @vertex fn vertexKernel(
 
-  @location(0) meshID: f32,
-  @location(1) materialID: f32,
-  @location(2) vertexData: vec3f,
-  @location(3) normals: vec3f,
-  @location(4) uv: vec2f,
-
   @builtin(instance_index) instance: u32,
+
+  @location(0) transformationIndex: f32,
+  @location(1) vertexData: vec3f,
+  @location(2) normals: vec3f,
+  @location(3) uv: vec2f,
 
 ) -> VertexOut {
 
