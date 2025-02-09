@@ -1,5 +1,4 @@
-import { Light } from "./light/light.model";
-import { Renderer } from "./renderer.model";
+import { DirectionLight } from "./light/light.model";
 
 import shader from "./shaders/post/preview.wgsl?raw";
 
@@ -81,8 +80,8 @@ export class TexturePreview {
         module: this.shaderModule,
         entryPoint: "fragmentKernel",
         constants: {
-          0: Light.RESOLUTION,
-          1: Light.RESOLUTION,
+          0: DirectionLight.RESOLUTION,
+          1: DirectionLight.RESOLUTION,
         },
         targets: [
           {

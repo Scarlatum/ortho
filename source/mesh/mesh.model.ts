@@ -1,6 +1,7 @@
 import { mat4, vec3 } from "gl-matrix";
-import { Drawable } from "../interfaces/drawable.interface";
-import { ProceduredMaterial } from "./mesh.material.ts";
+import { Drawable, DrawableBuffers, RenderData, ShadowParams } from "../interfaces/drawable.interface";
+import { permutations } from "../utils/math.utils.ts";
+import { Model } from "../utils/model.utils.ts";
 
 export const enum VERTEX_LAYOUT {
   ID,
@@ -16,143 +17,170 @@ export const enum VERTEX_LAYOUT {
   SR,
 }
 
-export interface IMesh {
-  id: symbol,
-  uv: Nullable<WeakRef<Float32Array>>,
-  normals: Nullable<WeakRef<Float32Array>>,
-  material: Nullable<ProceduredMaterial>,
-  vertexes: WeakRef<Float32Array>,
-  texture: GPUTexture;
+export interface BoundingPoints<
+  V extends ArrayLike<number> = vec3
+> {
+  a: V;
+  b: V;
 }
 
-export interface ShadowPoperty {
-  recieve: boolean;
-  cast: boolean;
-};
+export type MeshPayload = Omit<DereferencedObjectValues<RenderData>, "model">;
 
-export class Mesh extends Drawable implements IMesh {
+export class Mesh extends Drawable {
 
-  static TRANSFORM_BUFFER_STRIDE = 4 * 4 * Float32Array.BYTES_PER_ELEMENT;
+  static MAT4SIZE = 4 * 4;
   static VERTEX_SIZE = 9;
 
+  public override readonly model: Model;
+  public vertexCount;
+  public id = Symbol(Math.random());
+  public modelPointer: number = 0;
+  public override data: RenderData;
   public override instances = 1; 
-  public override instanceParamBuffer: GPUBuffer;
-  public id = Symbol("mesh");
-  public model = mat4.create();
-  public transformationIndex: number = 0;
-  public uv: Nullable<WeakRef<Float32Array>> = null;
-  public material: Nullable<ProceduredMaterial> = null;
-  public texture: GPUTexture;
-  override shadowCast: boolean = false;
-  override shadowRecieve: boolean = false;
+  public override buffers: DrawableBuffers = Object();
+  public override shadowParams: ShadowParams = {
+    cast: true,
+    recieve: false,
+  };
 
-  public vertexes: WeakRef<Float32Array>;
-  public normals: Nullable<WeakRef<Float32Array>> = null;
-
-  vertexBuffer;
-  tranformationBuffer;
-  vertexCount;
+  public box: BoundingPoints<vec3>;
+  public edges: Array<vec3>;
 
   constructor(
-    payload: DereferencedObjectValues<IMesh>,
-    shadowprop: ShadowPoperty,
+    payload: MeshPayload,
+    shadowprop: ShadowParams,
+    visibilityBuffer = device.createBuffer({
+      size: Uint32Array.BYTES_PER_ELEMENT * 1,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    })
   ) {
 
     super();
 
-    this.id           = payload.id
-    this.vertexes     = new WeakRef(payload.vertexes);
-    this.normals      = new WeakRef(payload.normals);
-    this.uv           = new WeakRef(payload.uv);
-    this.texture      = payload.texture;
+    this.data = {
+      vertexes  : new WeakRef(payload.vertexes),
+      normals   : new WeakRef(payload.normals),
+      uv        : new WeakRef(payload.uv),
+      texture   : payload.texture,
+      material  : payload.material,
+    };
+
     this.vertexCount  = payload.vertexes.length / 3;
-    this.material     = payload.material;
 
-    // @ts-expect-error
-    globalThis.randomBuffer = this.vertexes;
+    { // Set GPU Buffers
 
-    // vertex buffer set
-    this.vertexBuffer = device.createBuffer({
-      size: this.vertexCount * Mesh.VERTEX_SIZE * Float32Array.BYTES_PER_ELEMENT,
-      usage: GPUBufferUsage.VERTEX
-        | GPUBufferUsage.COPY_DST
-    });
+      this.buffers.vertex = device.createBuffer({
+        size: this.vertexCount * Mesh.VERTEX_SIZE * Float32Array.BYTES_PER_ELEMENT,
+        usage: GPUBufferUsage.VERTEX
+          | GPUBufferUsage.COPY_DST
+      });
+  
+      this.buffers.tranformation = device.createBuffer({
+        size: Mesh.MAT4SIZE * Float32Array.BYTES_PER_ELEMENT,
+        usage: GPUBufferUsage.VERTEX
+          | GPUBufferUsage.COPY_DST
+          | GPUBufferUsage.STORAGE,
+        mappedAtCreation: true
+      });
+  
+      this.buffers.params = device.createBuffer({
+        size: Uint32Array.BYTES_PER_ELEMENT * 3,
+        usage: GPUBufferUsage.UNIFORM,
+        mappedAtCreation: true,
+      });
+  
+      this.buffers.visibility = visibilityBuffer;
 
-    this.tranformationBuffer = device.createBuffer({
-      size: Mesh.TRANSFORM_BUFFER_STRIDE,
-      usage: GPUBufferUsage.VERTEX
-        | GPUBufferUsage.COPY_DST
-        | GPUBufferUsage.STORAGE,
-    });
+      { // ? Populate the transforamtion buffer with an identity values to prevent mesh to pop out on a vertex stage.
 
-    this.instanceParamBuffer = device.createBuffer({
-      size: Uint32Array.BYTES_PER_ELEMENT * 3,
-      usage: GPUBufferUsage.UNIFORM,
-      mappedAtCreation: true,
-    });
+        mat4.identity(new Float32Array(this.buffers.tranformation.getMappedRange()));
+
+        this.buffers.tranformation.unmap();
+
+      }
+
+    }
+
+    this.model = new Model(this.buffers.tranformation);
 
     const vbo = new Float32Array(this.vertexCount * Mesh.VERTEX_SIZE);
 
-    Mesh.constructVertexData(this, vbo, this.vertexCount);
+    this.box    = Mesh.constructVertexData(this, vbo);
+    this.edges  = permutations(this.box.a, this.box.b);
 
-    device.queue.writeBuffer(this.vertexBuffer!, 0, vbo);
+    device.queue.writeBuffer(this.buffers.vertex, 0, vbo);
 
-    new Uint32Array(this.instanceParamBuffer.getMappedRange()).set([
+    new Uint32Array(this.buffers.params.getMappedRange()).set([
       payload.material?.id || 0,
-      Number(this.shadowCast = shadowprop.cast),
-      Number(this.shadowRecieve = shadowprop.recieve),
+      Number(this.shadowParams.cast = shadowprop.cast),
+      Number(this.shadowParams.recieve = shadowprop.recieve),
     ]);
 
-    this.instanceParamBuffer.unmap();
-
-  }
-
-  set writeModel(value: mat4) {
-
-    this.model = value;
-
-    if (this.tranformationBuffer) {
-      device.queue.writeBuffer(
-        this.tranformationBuffer,
-        0,
-        new Float32Array(this.model)
-      );
-    }
+    this.buffers.params.unmap();
 
   }
 
   static constructVertexData(
     mesh: Mesh,
     out: Float32Array,
-    vertexCount: number,
-    offset: number = 0,
   ) {
 
-    const vertexes = mesh.vertexes.deref();
-    const normals = mesh.normals?.deref();
-    const uv = mesh.uv?.deref();
+    const vertexes = mesh.data.vertexes.deref();
+    const normals = mesh.data.normals?.deref();
+    const uv = mesh.data.uv?.deref();
 
     if ( !vertexes ) throw Error();
 
-    for (let v = 0; v < vertexCount; v++) {
-      
-      out.set([
-        mesh.transformationIndex,
-        vertexes[ v * 3 + 0 ], 
-        vertexes[ v * 3 + 1 ], 
-        vertexes[ v * 3 + 2 ],
-        normals?.[ v * 3 + 0 ] || 0.0,
-        normals?.[ v * 3 + 1 ] || 0.0,
-        normals?.[ v * 3 + 2 ] || 0.0,
-        uv?.[ v * 2 + 0 ] || 0.0,
-        uv?.[ v * 2 + 1 ] || 0.0,
-      ], offset);
+    let offset = 0;
+
+    const min = [
+      0 + Number.MAX_SAFE_INTEGER,
+      0 + Number.MAX_SAFE_INTEGER,
+      0 + Number.MAX_SAFE_INTEGER,
+    ] as vec3;
+
+    const max = [
+      0 - Number.MAX_SAFE_INTEGER,
+      0 - Number.MAX_SAFE_INTEGER,
+      0 - Number.MAX_SAFE_INTEGER,
+    ] as vec3;
+
+    const position = [0,0,0] as vec3;
+
+    for (let v = 0; v < mesh.vertexCount; v++) {
+
+      position[0] = vertexes[v * 3 + 0],
+      position[1] = vertexes[v * 3 + 1],
+      position[2] = vertexes[v * 3 + 2],
+
+      vec3.min(min, position, min);
+      vec3.max(max, position, max);
+
+      out[offset] = mesh.modelPointer;
+
+      out[offset + 1] = position[0]; 
+      out[offset + 2] = position[1]; 
+      out[offset + 3] = position[2];
+
+      if ( normals ) {
+        out[offset + 4] = normals[v * 3 + 0]
+        out[offset + 5] = normals[v * 3 + 1]
+        out[offset + 6] = normals[v * 3 + 2]
+      }
+
+      if ( uv ) {
+        out[offset + 7] = uv?.[v * 2 + 0];
+        out[offset + 8] = uv?.[v * 2 + 1];
+      }
 
       offset += Mesh.VERTEX_SIZE;
 
     }
 
-    return offset;
+    return {
+      a: min,
+      b: max,
+    } as BoundingPoints;
 
   }
 
@@ -189,20 +217,25 @@ export class Mesh extends Drawable implements IMesh {
 
 export class InstancesMesh extends Mesh {
 
-  public models: Array<mat4>;
+  public models: Array<Float32Array>;
+  public visibilityIndexes: Uint8Array;
 
   constructor(
-    data: DereferencedObjectValues<IMesh>,
-    shadowprop: ShadowPoperty,
-    public override instances: number,
+    data: MeshPayload,
+    shadowprop: ShadowParams,
+    public override readonly instances: number,
   ) {
 
-    super(data, shadowprop);
+    super(data, shadowprop, device.createBuffer({
+      size  : Uint32Array.BYTES_PER_ELEMENT * instances,
+      usage : GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+    }));
 
-    this.models = Array.from({ length: instances }, () => mat4.create());
+    this.models = Array.from({ length: instances }, () => mat4.create() as Float32Array);
+    this.visibilityIndexes = new Uint8Array(instances).fill(1);
 
-    this.tranformationBuffer = device.createBuffer({
-      size: Mesh.TRANSFORM_BUFFER_STRIDE * instances,
+    this.buffers.tranformation = device.createBuffer({
+      size: Mesh.MAT4SIZE * instances * Float32Array.BYTES_PER_ELEMENT,
       usage: GPUBufferUsage.VERTEX
         | GPUBufferUsage.COPY_DST
         | GPUBufferUsage.STORAGE,
@@ -210,25 +243,41 @@ export class InstancesMesh extends Mesh {
 
   }  
 
-  public * writeModels(): Generator<[ mat4, number ]> {
+  public * writeModels(): Generator<[ Float32Array, number ]> {
 
-    const size = Mesh.TRANSFORM_BUFFER_STRIDE / Float32Array.BYTES_PER_ELEMENT;
-
-    const transformationBatch = new Float32Array(this.instances * size);
+    const stride = Mesh.MAT4SIZE;
+    
+    const transformationBatch = new Float32Array(this.instances * stride);
 
     for (let i = 0; i < this.instances; i++) {
 
       yield [ this.models[i], i ];
 
-      transformationBatch.set(this.models[i], i * size);
+      transformationBatch.set(this.models[i], i * stride);
 
     }
 
     device.queue.writeBuffer(
-      this.tranformationBuffer, 
+      this.buffers.tranformation, 
       0, 
       transformationBatch
     );
+
+  }
+
+  updateVisibilityBuffer() {
+
+    const data = new Uint32Array(this.instances);
+
+    let ptr = 0;
+
+    for ( let i = 0; i < data.length; i++ ) {
+      if ( this.visibilityIndexes[i] === 1 ) data[ptr++] = i;
+    }
+
+    device.queue.writeBuffer(this.buffers.visibility, 0, data);
+
+    return data.length;
 
   }
 

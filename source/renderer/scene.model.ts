@@ -1,35 +1,52 @@
+import { MSAA, Renderer } from "./renderer.model";
+
 import { Camera } from "./camera/camera.model";
 import { Actor } from "../entity/actor.entity";
+
 import { Drawable } from "../interfaces/drawable.interface";
 import { SceneInterface } from "../interfaces/scene.interface";
-import { Mesh } from "../mesh/mesh.model";
-import { MSAA, Renderer } from "./renderer.model";
+
+import { InstancesMesh, Mesh } from "../mesh/mesh.model";
 import { ProceduredMaterial } from "../mesh/mesh.material";
-import { ShaderBuilder } from "../mesh/builders/shader.builder";
+import { Preprocessor } from "../utils/preprocessor.utils";
 
 // Light
-import { LightSources } from "./light/light.model"
+import { ShadowPass } from "./passes/shadow.pass"
 
 import * as utils from "./renderer.utils";
+import { PointLightRepository } from "./light/point.model";
+import { DirectionLight } from "./light/light.model";
+
+const enum BindgroupLabels {
+  BaseGroup,
+  InstanceGroup,
+  ShadowMappingGroup,
+  PointLightGroup
+}
 
 export class Scene extends SceneInterface {
+
+  static SHADOW_PASS  = true;
+  static LIGHT_PASS   = false;
 
   pipeline: GPURenderPipeline;
   
   private passDescriptor = Scene.baseColorAttacment();
   private bindgroupMap = new WeakMap<Drawable, GPUBindGroup>();
+  private bundles = new WeakMap<Drawable, GPURenderBundle>();
   
   public actor: Actor;
-  public drawQueue: Drawable[] = Array();
-  public onpass: Set<Function> = new Set();
+  public sun = new DirectionLight();
+  public drawQueue = new Set<Drawable>();
+  public onpass = new Set<Function>();
   public meshes = new Map<any, Mesh>();
-  public lightSources: LightSources;
+  public shadowPass: ShadowPass;
+  public pointLightSource: PointLightRepository;
   public setupBindgroup: GPUBindGroup;
 
   constructor(
     public renderer: Renderer,
     public materials: Array<ProceduredMaterial> = [],
-    public resourses: Record<string, URL> = {},
   ) {
 
     super();
@@ -37,70 +54,66 @@ export class Scene extends SceneInterface {
     const aspect = window.innerWidth / window.innerHeight;
 
     this.actor = new Actor(new Camera(aspect));
-    this.lightSources = new LightSources(this);
 
-    this.renderer.shaderBuilder.applyMaterials(
+    this.renderer.preprocessor.applyMaterials(
       this.materials.map(x => this.renderer.materials.register(x))
     );
 
-    this.pipeline = utils.createBasePipeline(renderer.device, ShaderBuilder.compile(
-      this.renderer.shaderBuilder,
-      window.device
-    ), { multisample: { count: this.renderer.msaa }, label: "Scene Pipiline Test", layout: device.createPipelineLayout({
+    const layout = device.createPipelineLayout({
       bindGroupLayouts: [
         device.createBindGroupLayout({
+          label: BindgroupLabels.BaseGroup.toString(),
           entries: [
-            {
-              binding: 0,
-              visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX,
-              buffer: { type: "uniform" }
-            },
-            {
-              binding: 1,
-              visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX,
-              buffer: { type: "uniform" }
-            },
-            {
-              binding: 2,
-              visibility: GPUShaderStage.FRAGMENT,
-              sampler: { type: "filtering" }
-            },
-            {
-              binding: 3,
-              visibility: GPUShaderStage.FRAGMENT,
-              sampler: { type: "comparison" }
-            },
+            { binding: 0, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: "uniform" } },
+            { binding: 1, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: "uniform" } },
+            { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
+            { binding: 3, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "comparison" } },
           ]
         }),
         device.createBindGroupLayout({
-          label: "Scene Lighting Layout",
+          label: BindgroupLabels.InstanceGroup.toString(),
           entries: [
             { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
-            { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { viewDimension: "2d", sampleType: "float" } },
-            { binding: 2, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } }
+            { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
+            { binding: 2, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
+            { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { viewDimension: "2d", sampleType: "float" } },
           ]
         }),
         device.createBindGroupLayout({
-          label: `Scene Layout`,
+          label: BindgroupLabels.ShadowMappingGroup.toString(),
            entries: [
             { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
-            { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { viewDimension: "2d", sampleType: "depth" } },
-            { binding: 2, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } }
+            { binding: 1, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
+            { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { viewDimension: "2d-array", sampleType: "depth" } },
+          ]
+        }),
+        device.createBindGroupLayout({
+          label: BindgroupLabels.PointLightGroup.toString(),
+          entries: [
+            { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "read-only-storage" } }
           ]
         })
       ]
-    }) });
+    });
+
+    this.pipeline = utils.createBasePipeline(Preprocessor.setup(
+      "Scene shader",
+      this.renderer.preprocessor, 
+    ), { multisample: { count: this.renderer.msaa }, label: "Scene Pipiline Test", layout });
 
     this.setupBindgroup = device.createBindGroup({
       label: "Scene Setup Bindgroup",
       layout: this.pipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.renderer.baseUniformBuffer } },
-        { binding: 1, resource: { buffer: this.actor.camera.buffer } },
+        { binding: 1, resource: { buffer: this.actor.camera.gbuffer } },
         { binding: 2, resource: this.renderer.sampler },
         { binding: 3, resource: this.renderer.compSampler }
       ]
     });
+
+    this.shadowPass = new ShadowPass(this);
+    this.pointLightSource = new PointLightRepository(this);
 
     this.renderer.onResizeHooks.add(() => this.onScreenChange());
 
@@ -167,25 +180,6 @@ export class Scene extends SceneInterface {
     }
   }
 
-  // createRenderBundle(x: Drawable, bindgroup: GPUBindGroup) {
-
-  //   const bundle = window.device.createRenderBundleEncoder({
-  //     colorFormats: [ Renderer.RENDER_FORMAT ],
-  //     depthStencilFormat: 'depth24plus',
-  //   });
-
-  //   bundle.setPipeline(this.pipeline);
-  //   bundle.setBindGroup(0, bindgroup);
-  //   bundle.setVertexBuffer(0, x.vertexBuffer);
-  //   bundle.draw(
-  //     x.vertexBuffer.size / Float32Array.BYTES_PER_ELEMENT / Mesh.VERTEX_SIZE,
-  //     x.instances
-  //   );
-
-  //   return bundle.finish();
-
-  // }
-
   pass(encoder: GPUCommandEncoder, qs?: GPUQuerySet): void {
 
     this.actor.update();
@@ -196,63 +190,72 @@ export class Scene extends SceneInterface {
 
     }
 
-    { // TODO: Проход карт теней
-      this.lightSources.pass(encoder, this.drawQueue);
+    if ( Scene.SHADOW_PASS ) {
+      this.shadowPass.pass(encoder, this.drawQueue);
+    }
+
+    if ( Scene.LIGHT_PASS ) { // Point lights
+      this.pointLightSource.update();
     }
 
     { // Render pass
 
-      const passDescriptor = this.updatePassDescriptor(qs);
+      const desc = this.updatePassDescriptor(qs);
+      const pass    = encoder.beginRenderPass(desc);
 
-      const pass = encoder.beginRenderPass(passDescriptor);
+      const queue      = Array<GPURenderBundle>();
 
-      pass.setPipeline(this.pipeline);
-      
       for (const x of this.drawQueue) {
-
-        if (x.drop) continue;
-
-        pass.setBindGroup(0, this.setupBindgroup);
-        pass.setBindGroup(2, this.lightSources.bindgroup);
-
-        if ( this.bindgroupMap.has(x) ) {
-          pass.setBindGroup(1, this.bindgroupMap.get(x)!);
-        } else {
-
-          const uuid = crypto.randomUUID();
-
-          const bindgroup = device.createBindGroup({
-            label: `Scene Bindgroup :: ${ uuid }`,
-            layout: this.pipeline.getBindGroupLayout(1),
-            entries: [
-              { binding: 0, resource: { buffer: x.tranformationBuffer } },
-              { binding: 1, resource: x.texture.createView() },
-              { binding: 2, resource: { buffer: x.instanceParamBuffer } },
-            ]
-          });
-
-          pass.setBindGroup(1, this.bindgroupMap
-            .set(x, bindgroup)
-            .get(x)!
-          );
-
-        }
-
-        pass.setVertexBuffer(0, x.vertexBuffer);
-
-        const vertexCount = x.vertexBuffer.size
-          / Float32Array.BYTES_PER_ELEMENT
-          / Mesh.VERTEX_SIZE
-          ;
-
-        pass.draw(vertexCount, x.instances);
-
+        if ( x.drop === false ) queue.push(this.bundles.get(x) || this.createBundle(x));
       }
 
+      pass.executeBundles(queue);
       pass.end();
 
     }
 
   }
 
+  private createBundle(x: Drawable) {
+
+    let bundle: GPURenderBundle;
+
+    const encoder = device.createRenderBundleEncoder({
+      colorFormats        : [ Renderer.RENDER_FORMAT ],
+      depthStencilFormat  : Renderer.DEPTH_FORMAT,
+      sampleCount         : this.renderer.msaa,
+    });
+
+    encoder.setPipeline(this.pipeline);
+    encoder.setBindGroup(0, this.setupBindgroup);
+    encoder.setBindGroup(2, this.shadowPass.bindgroup!);
+    encoder.setBindGroup(3, this.pointLightSource.bindgroup);
+
+    let bindgroup = this.bindgroupMap.get(x);
+
+    if (bindgroup) encoder.setBindGroup(1, bindgroup);
+
+    else this.bindgroupMap.set(x, bindgroup = device.createBindGroup({
+      label: "Drawable Instance Bindgroup",
+      layout: this.pipeline.getBindGroupLayout(1),
+      entries: [
+        { binding: 0, resource: { buffer: x.buffers.tranformation } },
+        { binding: 1, resource: { buffer: x.buffers.visibility } },
+        { binding: 2, resource: { buffer: x.buffers.params } },
+        { binding: 3, resource: x.data.texture.createView() },
+      ]
+    }));
+
+    encoder.setVertexBuffer(0, x.buffers.vertex);
+    encoder.setBindGroup(1, bindgroup);
+
+    x instanceof InstancesMesh
+      ? encoder.draw(x.vertexCount, x.updateVisibilityBuffer())
+      : encoder.draw(x.vertexCount);
+
+    this.bundles.set(x, bundle = encoder.finish());
+
+    return bundle;
+
+  }
 }

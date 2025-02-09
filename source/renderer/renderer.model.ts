@@ -1,6 +1,6 @@
 import { MaterialRepository } from "./renderer.material";
 
-import { ShaderBuilder } from "../mesh/builders/shader.builder";
+import { Preprocessor } from "../utils/preprocessor.utils";
 
 import { SceneInterface } from "../interfaces/scene.interface";
 import { PostEffect } from "../interfaces/postpass.interface";
@@ -20,6 +20,8 @@ export const enum MSAA { NONE = 1, X4 = 4, X8 = 8, X16 = 16 };
 
 export class Renderer {
 
+  static dec = new TextDecoder();
+
   static readonly DEPTH_FORMAT: GPUTextureFormat = "depth24plus";
   static readonly RENDER_FORMAT: GPUTextureFormat = navigator.gpu.getPreferredCanvasFormat();
   static readonly TIME_MEASURE = import.meta.env.DEV;
@@ -28,8 +30,10 @@ export class Renderer {
   public materials = new MaterialRepository();
 
   public info = {
-    currentFrame: 0,
-    frameRate: 0,
+    currentFrame  : 0,
+    frameRate     : 0,
+    delta         : 0,
+    timestampPrev : 0,
   };
 
   public msaa: MSAA = MSAA.X4;
@@ -42,7 +46,7 @@ export class Renderer {
   public frameBuffer: GPUTexture;
   public normalBuffer: GPUTexture;
   public baseUniformBuffer: GPUBuffer;
-  public shaderBuilder: ShaderBuilder;
+  public preprocessor: Preprocessor;
   public postPasses = new Set<PostEffect>();
   public compSampler: GPUSampler;
 
@@ -74,9 +78,9 @@ export class Renderer {
         ,
     });
 
-    this.shaderBuilder = new ShaderBuilder({
-      bindings: s_bindings,
+    this.preprocessor = new Preprocessor({
       constants: s_constants,
+      bindings: s_bindings,
       structs: s_structs,
       utils: s_utils,
       kernel: {
@@ -241,10 +245,12 @@ export class Renderer {
 
   }
 
-  public render(frameCallback: Nullable<(info: Renderer['info']) => void>) {
+  public render(time: DOMHighResTimeStamp = 0) {
 
-    this.info.currentFrame++;
-    
+    this.info.timestampPrev = time;
+
+    const campos = this.currentScene.actor.camera.position;
+
 		window.device.queue.writeBuffer(
       this.baseUniformBuffer, 
       0, 
@@ -253,13 +259,13 @@ export class Renderer {
         0, // byte for align
         this.context.canvas.width,
         this.context.canvas.height,
-        ...this.currentScene.actor.camera.position
+        campos[0],
+        campos[1],
+        campos[2],
       ]),
     );
 
     if (this.framedrop === false) {
-
-      if (frameCallback) frameCallback(this.info);
 
       { // Основной проход
 
@@ -283,12 +289,10 @@ export class Renderer {
 
       { // Пост-процессинг
 
-        // ? Тут начинается второй проход отрисовщика для пост-эффектов разного толка.
-        // ? Честно, я не совсем ещё уверен как мне работать с MSAA в данном контексте...      
         for (const post of this.postPasses) {
           post.pass(this.context.getCurrentTexture());
         }
-
+        
       }
 
       // const l = Array.from(this.currentScene.lightSources.lights);
@@ -303,7 +307,9 @@ export class Renderer {
 
     }
 
-    requestAnimationFrame(() => this.render(frameCallback));
+    requestAnimationFrame(timestamp => this.render(timestamp));
+
+    this.info.delta = Math.max(time - this.info.timestampPrev, 0);
 
   }
 

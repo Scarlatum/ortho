@@ -1,7 +1,9 @@
+import { vec2 } from "gl-matrix";
 import { ProceduredMaterial } from "../mesh/mesh.material";
-import { IMesh, InstancesMesh, Mesh, ShadowPoperty } from "../mesh/mesh.model";
+import { InstancesMesh, Mesh, MeshPayload } from "../mesh/mesh.model";
 import { Wave } from "../mesh/parsers/waveform";
 import * as utils from "../renderer/renderer.utils";
+import { ShadowParams } from "../interfaces/drawable.interface";
 
 interface CreationRequirements {
   geometry: ReturnType<typeof Wave.parseTextFile>,
@@ -10,25 +12,24 @@ interface CreationRequirements {
 }
 
 interface Assets {
-  textures: Nullable<Array<string>>,
-  geometry: string,
+  textures: Nullable<Array<Record<string, Array<string>>>>,
+  geometry: string | ReturnType<typeof Wave.parseTextFile>,
 }
 
 type InstancedQuality<T extends number> = T extends 1 ? Mesh : InstancesMesh
 
-export class Creation<State, const Instances extends number> {
+export class Creation<State, const Instances extends number = 1> {
 
   public mesh: InstancedQuality<Instances>;
 
   constructor(
     { geometry, material, texture }: CreationRequirements, 
-    shadowprop: ShadowPoperty,
+    shadowprop: ShadowParams,
     private instances: Instances,
     public state: Nullable<State> = null
   ) {
 
-    const data: DereferencedObjectValues<IMesh> = {
-      id        : Symbol("mesh uniq id"),
+    const data: MeshPayload = {
       material  : material,
       vertexes  : Wave.constructBuffer(geometry, Wave.BufferType.Vertex),
       texture   : texture,
@@ -48,18 +49,24 @@ export class Creation<State, const Instances extends number> {
   static async create<const I extends number, S>(
     assets: Assets,
     customMaterial: Nullable<ProceduredMaterial> = null,
-    shadowprop: ShadowPoperty,
+    shadowprop: ShadowParams,
     instaces: I = 1 as I,
-    state: Nullable<S> = null
+    state: Nullable<S> = null,
+    sizeMut?: vec2,
   ) {
 
     let texture: GPUTexture;
 
     if ( assets.textures ) {
 
-      const [ tex, _image ] = await utils.createImageTexture(window.device, assets.textures);
+      const [ first ] = await utils.createImageTexture(window.device, assets.textures);
 
-      texture = tex;
+      texture = first.texture;
+
+      if ( sizeMut ) {
+        sizeMut[0] = first.w;
+        sizeMut[1] = first.h;
+      }
 
     } else {
 
@@ -67,7 +74,19 @@ export class Creation<State, const Instances extends number> {
 
     }
 
-    const geometry = Wave.parseTextFile(assets.geometry);
+    let geometry: Assets['geometry'];
+
+    if ( typeof assets.geometry === "string" ) {
+
+      geometry = Wave.parseTextFile(assets.geometry);
+
+      // if ( import.meta.env.DEV && geometry.buffers.vertex.length === 0 ) throw Error();
+
+    } else {
+
+      geometry = assets.geometry;
+
+    }
 
     return new Creation({
       geometry: geometry,

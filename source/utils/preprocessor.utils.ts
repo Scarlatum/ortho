@@ -1,4 +1,4 @@
-import { ProceduredMaterial } from "../mesh.material";
+import { ProceduredMaterial } from "../mesh/mesh.material";
 
 interface ShaderCode {
   vertex: string,
@@ -16,7 +16,7 @@ interface ShaderParams extends Partial<OptionalParams> {
   kernel: ShaderCode;
 }
 
-export class ShaderBuilder {
+export class Preprocessor {
 
   private code: ShaderCode = Object();
 
@@ -39,7 +39,7 @@ export class ShaderBuilder {
 
   }
 
-  applyMaterials(material: Array<ProceduredMaterial>): ShaderBuilder {
+  applyMaterials(material: Array<ProceduredMaterial>): Preprocessor {
 
     material.forEach(x => {
       this.code.fragment = this.code.fragment.replaceAll("// #MATERIAL", /* wgsl */`
@@ -54,16 +54,18 @@ export class ShaderBuilder {
 
   }
 
-  static compile(builder: ShaderBuilder, device: GPUDevice) {
+  static setup(label: string, builder: Preprocessor) {
 
     const fs = builder.code.fragment;
     const vs = builder.code.vertex;
 
     return {
       fragment: device.createShaderModule({
+        label,
         code: fs,
       }),
       vertex: device.createShaderModule({
+        label,
         code: vs,
       }),
     } as const;

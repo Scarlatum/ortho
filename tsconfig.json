@@ -4,7 +4,7 @@
     "useDefineForClassFields": true,
     "module": "ESNext",
     "lib": [
-      "ES2023",
+      "ESNext",
       "DOM",
       "DOM.Iterable"
     ],
@@ -16,6 +16,7 @@
     "resolveJsonModule": true,
     "noEmit": true,
     "allowArbitraryExtensions": true,
+    "isolatedModules": true,
     /* Linting */
     "strict": true,
     "noImplicitAny": true,

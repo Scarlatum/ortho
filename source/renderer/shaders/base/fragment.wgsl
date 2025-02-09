@@ -1,34 +1,72 @@
-const shadow_map_uv = 1.0 / (1024.0 * 3.0);
-const shadow_offset = 0.001;
-
 @fragment fn fragmentKernel(
   @builtin(front_facing) face: bool,
   in: VertexOut,
 ) -> @location(0) vec4f {
 
-  var color    = vec4f(1.0);
-  let distance = abs(distance(in.globalCoords.xyz, params.globalPosition.xyz)) / 600;
+  if ( face == false ) { discard; }
 
-  let texel = textureSample(texture, textureSampler, in.textureUV);
+  var light = vec3f(0.0);
+  var color = vec4f(1.0);
 
-  let shdw = dot(in.norm.xyz, light_direction) * -0.1;
-  let mist = noise(in.globalCoords.yz / 100 + params.tick / 600) * 0.01;
+  let dist  = distance(in.globalCoords.xyz, params.globalPosition.xyz);
 
-  var visibility = textureSampleCompare(
-    light_depth, shadowSampler, 
-    in.lightSpace.xy + vec2(1,1) * shadow_map_uv, in.lightSpace.z + shadow_offset
-  ) + textureSampleCompare(
-    light_depth, shadowSampler, 
-    in.lightSpace.xy + vec2(0,1) * shadow_map_uv, in.lightSpace.z + shadow_offset
-  ) + textureSampleCompare(
-    light_depth, shadowSampler, 
-    in.lightSpace.xy + vec2(1,0) * shadow_map_uv, in.lightSpace.z + shadow_offset
-  ) + textureSampleCompare(
-    light_depth, shadowSampler, 
-    in.lightSpace.xy + vec2(0,0) * shadow_map_uv, in.lightSpace.z + shadow_offset
-  );
+  let nrml  = dot(in.norm.xyz, light_direction);
+  let ambt  = vec3f(1.0);
+  let mist  = noise(in.globalCoords.yz / 100 + params.tick / 600) * MIST_DENSITY;
+  let fog   = abs(dist) / FOG_DISTANCE * FOG_DENSITY;
 
-  visibility /= 4.0;
+  let shadow_offset = clamp(-0.005 * tan(asin(nrml)), 0.0, 1.0);
+  let shadow_map_uv = 1.0 / SHADOW_MAP_RESOLUTION;
+
+  var visibility = 0.0;
+
+  if ( instanceParams.shadowRecieve == 1u ) {
+
+    let lp = array<vec4f, 4>(
+      in.directionLigthSpaceDistant,
+      in.directionLigthSpaceFar,
+      in.directionLigthSpaceNear,
+      in.directionLigthSpaceClose
+    );
+
+    for ( var i: u32 = 0; i < 4; i += 1 ) {
+
+      let space = lp[i];
+
+      let texel = textureSampleCompare(
+        light_depth, shadowSampler, 
+        space.xy, 3 - i, space.z,
+      );
+
+      visibility = mix(
+        visibility,
+        1.0 - texel,
+        ceil(clamp(0.0, 1.0, space.x) % 1.0) 
+        * 
+        ceil(clamp(0.0, 1.0, space.y) % 1.0)
+      );
+
+    }
+
+  }
+
+  // Point lights
+  for ( var i: u32 = 0; i < arrayLength(&pointLigth); i++ ) {
+
+    let p: PointLight = pointLigth[i];
+
+    if ( p.visibility != 0.0 ) {
+
+      let n = p.range / distance(in.globalCoords.xyz, p.position);
+
+      light += p.color
+        * (n * n)
+        * clamp(dot(in.norm.xyz, p.position - in.globalCoords.xyz), 0.0, 1.0)
+        ;
+      
+    }
+
+  }
 
   switch instanceParams.materialID {
     // #MATERIAL
@@ -37,15 +75,13 @@ const shadow_offset = 0.001;
     }
   }
 
-  let a = max(color.rgb - shdw, vec3f(0));
-  let b = (1 - visibility) * 0.15 * f32(instanceParams.shadowRecieve);
-  let c = max(a - b, vec3f(0)) + mist;
+  let shadow    = visibility * 0.15 * smoothstep(0.0, 1.0, nrml);
+  let dark      = nrml * -0.15;
+  let intencity = toGrayscale(ambt) + toGrayscale(light);
 
-  let n = (in.pos.x % 2.0 * 0.25) * (in.pos.y % 2.0 * 0.25) * (1 - distance);
+  let r = mix(clamp((color.rgb - dark - shadow + light) * intencity, vec3f(0), vec3f(1)), ambt, fog * 2) + mist;
 
-  let dr = (c + distance) - n;
+  return vec4f(r, 1.0);
 
-  return vec4f(dr, 1.0);
-  
 }
  

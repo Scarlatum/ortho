@@ -1,7 +1,6 @@
-const RADMAG: f32 = 1;
-
-@id(0) override BASE_SHAPE_R_COLOR: f32 = 1.0;
-@id(1) override BASE_SHAPE_G_COLOR: f32 = 1.0;
-@id(2) override BASE_SHAPE_B_COLOR: f32 = 1.0;
+@id(0) override SHADOW_MAP_RESOLUTION: f32 = 1024.0;
+@id(1) override FOG_DISTANCE: f32          = 400.0;
+@id(2) override FOG_DENSITY: f32           = 0.50;
+@id(3) override MIST_DENSITY: f32          = 0.05;
 
 const NORMAL_PREVIEW = false;

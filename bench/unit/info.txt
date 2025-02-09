@@ -1,0 +1,48 @@
+export type ParseResult = {
+  buffers: {
+    vertex: Float32Array,
+    normals: Float32Array;
+    uv: Float32Array;
+  },
+  faces: Array<Array<number>>,
+};
+
+export const enum BufferType { Vertex, UV, Normal };
+
+export function constructBuffer(result: ParseResult, type: BufferType) {
+
+  const offset = type === BufferType.UV ? 2 : 3;
+
+  const buffer = new Float32Array(result.faces.length * offset);
+
+  let target: Float32Array;
+
+  switch (type) {
+    case BufferType.Normal: 
+      target = result.buffers.normals; break;
+    case BufferType.UV: 
+      target = result.buffers.uv; break;
+    case BufferType.Vertex: 
+      target = result.buffers.vertex; break;
+  }
+
+  const faces = result.faces;
+
+  for (let ptr = 0; ptr < faces.length; ptr++) {
+
+    const index =  faces[ ptr ][ type ] - 1;
+
+    for ( let i = 0; i < offset; i++ ) {
+
+      const a = ptr * offset + i;
+      const b = index * offset + i;
+
+      buffer[a] = target[b];
+
+    }
+
+  }
+
+  return buffer;
+
+}

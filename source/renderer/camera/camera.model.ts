@@ -6,6 +6,8 @@ export const enum CameraView { Front, Up, Right };
 
 export class Observer {
 
+  #buffer = new SharedArrayBuffer(Float32Array.BYTES_PER_ELEMENT * 9);
+
   static BUFFER_SIZE = 4 * 4 * 2;
   static BUFFER_TYPE = Float32Array;
   static BUFFER_STRIDE = 4 * 4 * Float32Array.BYTES_PER_ELEMENT;
@@ -16,15 +18,24 @@ export class Observer {
   protected needsUpdate: boolean = true;
   protected matrix = Array<vec3>();
 
-  public position = [ 0, 1.7, 0 ] as vec3;
-  public target = [ 0, 1, 1 ] as vec3;
+  public readonly moveVector = new Float32Array(this.#buffer,Float32Array.BYTES_PER_ELEMENT * 6,3);
+  public readonly position = new Float32Array(this.#buffer,Float32Array.BYTES_PER_ELEMENT * 3,3);
+  public readonly target = new Float32Array(this.#buffer,0,3);
   public projection = mat4.create();
+  public gbuffer: GPUBuffer;
 
-  public buffer: GPUBuffer;
+  constructor(protected child?: Observer) {
 
-  constructor() {
+    if ( child ) {
+
+      if ( child.child === this ) throw Error("Observers couple has cyclic dependency");
+
+      this.position = child.position;
+      this.target   = child.target;
+
+    }
     
-    this.buffer = device.createBuffer({
+    this.gbuffer = device.createBuffer({
       label: `Observer matrixes ${ crypto.randomUUID() }`,
       size: Observer.BUFFER_TYPE.BYTES_PER_ELEMENT * Observer.BUFFER_SIZE,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
@@ -51,13 +62,15 @@ export class Observer {
     const ty = vec3.dot(this.position, this.matrix[ CameraView.Up ]);
     const tz = vec3.dot(this.position, this.matrix[ CameraView.Front ]);
 
-    device.queue.writeBuffer(this.buffer, 0, new Camera.BUFFER_TYPE(this.projection));
-    device.queue.writeBuffer(this.buffer, Observer.BUFFER_STRIDE, new Camera.BUFFER_TYPE([
+    device.queue.writeBuffer(this.gbuffer, 0, new Camera.BUFFER_TYPE(this.projection));
+    device.queue.writeBuffer(this.gbuffer, Observer.BUFFER_STRIDE, new Camera.BUFFER_TYPE([
       this.matrix[ CameraView.Right ][ Axis.X ], this.matrix[ CameraView.Up ][ Axis.X ], this.matrix[ CameraView.Front ][ Axis.X ], 0,
       this.matrix[ CameraView.Right ][ Axis.Y ], this.matrix[ CameraView.Up ][ Axis.Y ], this.matrix[ CameraView.Front ][ Axis.Y ], 0,
       this.matrix[ CameraView.Right ][ Axis.Z ], this.matrix[ CameraView.Up ][ Axis.Z ], this.matrix[ CameraView.Front ][ Axis.Z ], 0,
       -tx, -ty, -tz, 1,
     ]));
+
+    this.child?.update();
 
   }
 
@@ -68,7 +81,6 @@ export class Camera extends Observer {
   static BASE_FOV = 75;
 
   public fov = Camera.BASE_FOV;
-  public moveInertia = vec3.create();
   public sensetivity = .1;
   public rotation = vec2.create();
 
@@ -86,15 +98,6 @@ export class Camera extends Observer {
       Camera.FAR_POINT,
     );
 
-    // const scale = 10;
-
-    // mat4.ortho(
-    //   this.projection,
-    //   -scale, scale, 
-    //   -scale, scale, 
-    //   0.1, 100
-    // );
-
   }
 
   get realtiveMovement() {
@@ -105,12 +108,12 @@ export class Camera extends Observer {
     const cross = vec3.cross([ 0, 0, 0 ], [ 0, 1, 0 ], norm);
 
     const shift = [
-      cross[ 0 ] * this.moveInertia[ Axis.X ] + norm[ 0 ] * this.moveInertia[ Axis.Y ],
-      cross[ 1 ] * this.moveInertia[ Axis.X ] + norm[ 1 ] * this.moveInertia[ Axis.Y ],
-      cross[ 2 ] * this.moveInertia[ Axis.X ] + norm[ 2 ] * this.moveInertia[ Axis.Y ],
+      cross[ 0 ] * this.moveVector[ Axis.X ] + norm[ 0 ] * this.moveVector[ Axis.Y ],
+      cross[ 1 ] * this.moveVector[ Axis.X ] + norm[ 1 ] * this.moveVector[ Axis.Y ],
+      cross[ 2 ] * this.moveVector[ Axis.X ] + norm[ 2 ] * this.moveVector[ Axis.Y ],
     ] as vec3;
 
-    shift[ Axis.Y ] += this.moveInertia[ Axis.Z ] * 10;
+    shift[ Axis.Y ] += this.moveVector[ Axis.Z ] * 10;
 
     vec3.add(this.target, this.target, shift);
     vec3.add(this.position, this.position, shift);
@@ -121,13 +124,13 @@ export class Camera extends Observer {
 
   private move(speedFactor = 50) {
 
-    for (let i = 0; i < this.moveInertia.length; i++) {
-      this.moveInertia[ i ] = Math.max(Math.abs(this.moveInertia[ i ])
-        - Math.abs(this.moveInertia[ i ]) / speedFactor, 0)
-        * Math.sign(this.moveInertia[ i ])
+    for (let i = 0; i < this.moveVector.length; i++) {
+      this.moveVector[ i ] = Math.max(Math.abs(this.moveVector[ i ])
+        - Math.abs(this.moveVector[ i ]) / speedFactor, 0)
+        * Math.sign(this.moveVector[ i ])
         ;
 
-      if (Math.abs(this.moveInertia[ i ]) < 0.0005) this.moveInertia[ i ] = 0;
+      if (Math.abs(this.moveVector[ i ]) < 0.0005) this.moveVector[ i ] = 0;
 
     }
 
@@ -140,7 +143,7 @@ export class Camera extends Observer {
 
   public movementHandler(movement: vec3) {
 
-    vec3.add(this.moveInertia, this.moveInertia, movement.map(x => x * 0.015) as vec3);
+    vec3.add(this.moveVector, this.moveVector, movement.map(x => x * 0.015) as vec3);
 
     this.needsUpdate = true;
 
@@ -217,31 +220,15 @@ export class Camera extends Observer {
 
   }
 
-  public viewSort<T extends vec3>(arr: Array<T>) {
+  public onFront<T extends vec3>(arr: Array<T>) {
 
     const pos = this.position
     const tar = this.target
 
-    const cur = vec3.normalize([ 0, 0, 0 ], vec3.sub([ 0, 0, 0 ], pos, tar));
-
-    arr.sort((current, next) => {
-
-      const a = vec3.dot(
-        vec3.normalize([ 0, 0,0 ], vec3.sub([ 0, 0, 0 ], pos, current)),
-        cur,
-      );
-
-      const b = vec3.dot(
-        vec3.normalize([ 0, 0,0 ], vec3.sub([ 0, 0, 0 ], pos, next)),
-        cur,
-      );
-
-      return a >= 0
-        ? (b - a) - (vec3.dist(next, pos) - vec3.dist(current, pos)) / 120
-        : 1
-        ;
-
-    });
+    return arr.some(x => 0 <= vec3.dot(
+      vec3.normalize([0,0,0], vec3.sub([0,0,0], x, tar)),
+      vec3.normalize([0,0,0], vec3.sub([0,0,0], x, pos)),
+    ));
 
   }
 

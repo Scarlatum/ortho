@@ -4,18 +4,22 @@ import { Mesh } from "../mesh/mesh.model";
 import { Renderer } from "../renderer/renderer.model";
 import { Drawable } from "./drawable.interface";
 import { ProceduredMaterial } from "../mesh/mesh.material";
-import { LightSources } from "../renderer/light/light.model";
+import { ShadowPass } from "../renderer/passes/shadow.pass";
+import { PointLightRepository } from "../renderer/light/point.model";
+import { DirectionLight } from "../renderer/light/light.model";
 
 export abstract class SceneInterface {
 
   abstract actor: Actor;
+  abstract sun: DirectionLight;
   abstract renderer: Renderer;
   abstract pipeline: GPURenderPipeline;
   abstract meshes: Map<any, Mesh>;
-  abstract drawQueue: Array<Drawable>;
-  abstract resourses: Record<string, URL>;
+  abstract drawQueue: Set<Drawable>;
   abstract materials: Array<ProceduredMaterial>;
-  abstract lightSources: LightSources;
+  abstract shadowPass: ShadowPass;
+  abstract pointLightSource: PointLightRepository;
+  abstract onpass: Set<Function>
 
   abstract pass(encoder: GPUCommandEncoder, qs?: GPUQuerySet): void;
   abstract onScreenChange(): void;

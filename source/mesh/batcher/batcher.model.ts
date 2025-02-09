@@ -46,7 +46,7 @@ export class Batcher {
         usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
       }),
       transformBuffer: device.createBuffer({
-        size: Mesh.TRANSFORM_BUFFER_STRIDE * this.meshes.size,
+        size: Mesh.MAT4SIZE * this.meshes.size,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
       }),
     } as const;
@@ -75,7 +75,7 @@ export class Batcher {
           new Float32Array(mesh.model)
         );
 
-        transformOffset += Mesh.TRANSFORM_BUFFER_STRIDE;
+        transformOffset += Mesh.MAT4SIZE;
 
       }
 

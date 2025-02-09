@@ -1,6 +1,9 @@
-import { ShaderBuilder } from "../mesh/builders/shader.builder";
+import { Preprocessor } from "../utils/preprocessor.utils";
 import { Mesh } from "../mesh/mesh.model";
+import { DirectionLight } from "./light/light.model";
 import { Renderer } from "./renderer.model";
+
+const DEFAULT_16x16 = new Float32Array(16 * 16);
 
 export function createBaseTexture(device: GPUDevice) {
 
@@ -17,7 +20,7 @@ export function createBaseTexture(device: GPUDevice) {
     {
       texture: baseTexture
     },
-    new Float32Array(Array.from({ length: 16 * 16 }, () => 0)),
+    DEFAULT_16x16,
     {
       bytesPerRow: 16 * Float32Array.BYTES_PER_ELEMENT,
       rowsPerImage: 16,
@@ -34,60 +37,84 @@ export function createBaseTexture(device: GPUDevice) {
 
 export async function createImageTexture(
   device: GPUDevice,
-  paths: Array<string>,
-): Promise<[ GPUTexture, { width: number, height: number } ]> {
+  paths: Array<Record<string, Array<string>>>,
+) {
 
-  const images = paths.map(x => {
+  const queue = Array<Promise<{ texture: GPUTexture, w: number, h: number }>>();
 
-    const img = new Image();
+  for ( const batch of paths ) {
 
-    img.src = x;
+    const paths = Object.keys(batch);
 
-    return img;
+    for ( const x of paths ) {
 
-  });
+      const img = new Image();
+            img.src = x;
+            
+      queue.push(new Promise(async resolve => {
 
-  await Promise.all(images.map(x => x.decode()));
+        await img.decode();
 
-  if ( import.meta.env.DEV ) {
+        const texture = device.createTexture({
+          format: "rgba8unorm",
+          usage: GPUTextureUsage.TEXTURE_BINDING
+            | GPUTextureUsage.COPY_DST
+            | GPUTextureUsage.COPY_SRC
+            | GPUTextureUsage.RENDER_ATTACHMENT,
+          size: {
+            width: img.width,
+            height: img.height,
+          },
+          dimension: "2d",
+          mipLevelCount: batch[x].length + 1,
+        });
+  
+        resolve({
+          texture,
+          h: img.height,
+          w: img.width
+        });
+  
+        createImageBitmap(img).then(bitmap => {
+          device.queue.copyExternalImageToTexture({
+            source: bitmap,
+            flipY: true,
+          }, {
+            texture: texture,
+          }, {
+            width: img.width,
+            height: img.height,
+          });
+        });
+  
+        for ( let i = 0; i < batch[x].length; i++ ) {
+  
+          const level = i + 1;
+          const mip = new Image(); 
+                mip.src = batch[x][i];
+  
+          mip.decode().then(() => createImageBitmap(mip)).then(bitmap => {
+            device.queue.copyExternalImageToTexture({
+              source: bitmap,
+              flipY: true,
+            }, {
+              texture: texture,
+              mipLevel: level,
+            }, {
+              width: img.width / (2 ** level),
+              height: img.height / (2 ** level),
+            });
+          });
+  
+        }
 
-    const identicalSize = images.every(x => x.height + x.width === images[0].height + images[0].width);
+      }));
 
-    if ( identicalSize === false ) throw Error();
+    }
 
   }
 
-  const texture = device.createTexture({
-    format: "rgba8unorm",
-    usage: GPUTextureUsage.TEXTURE_BINDING
-      | GPUTextureUsage.COPY_DST
-      | GPUTextureUsage.COPY_SRC
-      | GPUTextureUsage.RENDER_ATTACHMENT,
-    size: {
-      width: images[0].width,
-      height: images[0].height,
-    },
-    dimension: "2d",
-  });
-
-  for ( const x of images ) {
-    createImageBitmap(x).then(bitmap => {
-      device.queue.copyExternalImageToTexture({
-        source: bitmap,
-        flipY: true,
-      }, {
-        texture,
-      }, {
-        width: x.width,
-        height: x.height,
-      });
-    });
-  }
-
-  return [ texture, { 
-    width: images[0].width, 
-    height: images[0].height 
-  } ];
+  return Promise.all(queue);
 
 }
 
@@ -147,10 +174,8 @@ export function createBaseFragmentTarget(): GPUColorTargetState {
 }
 
 export function createBasePipeline(
-  device: GPUDevice,
-  shaders: ReturnType<typeof ShaderBuilder.compile>,
+  shaders: ReturnType<typeof Preprocessor.setup>,
   overrides: Partial<GPURenderPipelineDescriptor> = Object(),
-  constants?: Record<string, number>,
 ): GPURenderPipeline {
 
   const vertex: GPUVertexState = {
@@ -163,9 +188,10 @@ export function createBasePipeline(
     entryPoint: "fragmentKernel",
     module: shaders.fragment,
     targets: [ createBaseFragmentTarget() ],
+    constants: {
+      0: DirectionLight.RESOLUTION,
+    }
   }
-
-  if ( constants ) fragment.constants = vertex.constants = constants;
 
   return device.createRenderPipeline({
     layout: "auto",

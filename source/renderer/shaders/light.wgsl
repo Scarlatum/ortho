@@ -1,13 +1,18 @@
+@id(0) override SHADOW_MAP_RESOLUTION: f32 = 1024.0;
+@id(1) override FOG_DISTANCE: f32          = 400.0;
+@id(2) override FOG_DENSITY: f32           = 0.50;
+@id(3) override MIST_DENSITY: f32          = 0.05;
+
 struct VertexOut {
   @builtin(position) pos: vec4f,
 };
 
-struct ViewData {
+struct Observer {
   perspective   : mat4x4f,
   camera        : mat4x4f,
 };
 
-@group(0) @binding(0) var<uniform> view: ViewData;
+@group(0) @binding(0) var<uniform> view: Observer;
 @group(0) @binding(1) var<storage, read> transforms: array<mat4x4f>;
 
 @vertex fn vertexKernel(
@@ -38,6 +43,8 @@ struct ViewData {
 ) -> @location(0) vec4f {
 
   if ( face ) { discard; }
+
+  let r = SHADOW_MAP_RESOLUTION;
 
   return vec4f(1);
 

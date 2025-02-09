@@ -66,3 +66,7 @@ fn warp(
   return (f + 0.6*f*f + 0.5*f);
 
 }
+
+fn toGrayscale(rgb: vec3f) -> f32 {
+  return rgb.r * 0.25 + rgb.g * 0.5 + rgb.b * 0.25;
+}
