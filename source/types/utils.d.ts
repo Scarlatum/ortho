@@ -1,6 +1,7 @@
 type Nullable<T> = T | null;
+type Result<T> = T | Error;
 
-type DereferencedObjectValues<O extends object> = {
+type Deref<O extends object> = {
   [ K in keyof O ]: O[K] extends Nullable<WeakRef<infer V>> 
     ? V 
     : O[K]

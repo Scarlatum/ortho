@@ -3,8 +3,8 @@ declare module '*.wgsl?raw' {
   export default src;
 }
 namespace globalThis {
-  var device  : GPUDevice;
-  var adapter : GPUAdapter;
-  var context : GPUCanvasContext;
-  var auctx   : AudioContext;
+  var device    : GPUDevice;
+  var adapter   : GPUAdapter;
+  var context   : GPUCanvasContext;
+  var auctx     : AudioContext;
 }

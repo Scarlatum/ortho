@@ -1,16 +1,13 @@
 import { ProceduredMaterial } from "../mesh/mesh.material";
+import { DirectionLight, ShadowParams } from "../renderer/light/light.model";
 import { Model } from "../utils/model.utils";
 
-export interface ShadowParams {
-  recieve: boolean;
-  cast: boolean;
-};
-
 export type DrawableBuffers = {
-  params        : GPUBuffer; 
-  vertex        : GPUBuffer;
-  visibility    : GPUBuffer;
-  tranformation : GPUBuffer;
+  params          : GPUBuffer; 
+  vertex_full     : GPUBuffer;
+  vertex_reduced  : GPUBuffer;
+  visibility      : GPUBuffer;
+  tranformation   : GPUBuffer;
 }
 
 export interface RenderData {
@@ -22,11 +19,19 @@ export interface RenderData {
 }
 
 export abstract class Drawable {
-  public drop: boolean = false;
+
+  static defaultShadowParams = {
+    cast: true,
+    recieve: true,
+    cascade: DirectionLight.DEFAULT_CASCADE_FLAG
+  };
+
+  abstract readonly id: Symbol;
   abstract readonly model: Model;
-  abstract data: RenderData;
-  abstract instances: number;
-  abstract vertexCount: number;
-  abstract buffers: DrawableBuffers;
-  abstract shadowParams: ShadowParams;
+  abstract readonly data: RenderData;
+  abstract readonly instances: number;
+  abstract readonly vertexCount: number;
+  abstract readonly buffers: DrawableBuffers;
+  public drop: boolean = false;
+  public shadowParams: ShadowParams = structuredClone(Drawable.defaultShadowParams);
 }

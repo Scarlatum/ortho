@@ -1,5 +1,6 @@
 export abstract class PostEffect {
 
+  protected active = true;
   protected shaderModule: GPUShaderModule = Object();
   protected pipeline: GPURenderPipeline = Object();
   protected uniformBuffer: GPUBuffer = Object();

@@ -20,6 +20,9 @@ export class Preprocessor {
 
   private code: ShaderCode = Object();
 
+  private static readonly fragmentMixin = "@include(fragment);";
+  private static readonly materialMixin = "@include(material);";
+
   constructor(private params: ShaderParams) {
 
     this.code.fragment = [
@@ -39,14 +42,14 @@ export class Preprocessor {
 
   }
 
-  applyMaterials(material: Array<ProceduredMaterial>): Preprocessor {
+  public applyMaterials(material: Array<ProceduredMaterial>): Preprocessor {
 
     material.forEach(x => {
-      this.code.fragment = this.code.fragment.replaceAll("// #MATERIAL", /* wgsl */`
-        case ${x.id}u {
-          ${x.code}
+      this.code.fragment = this.code.fragment.replaceAll(Preprocessor.materialMixin, /* wgsl */`
+        case ${ x.id }u {
+          ${ x.code }
         }
-        // #MATERIAL
+        ${ Preprocessor.materialMixin }
       `);
     });
 
@@ -54,10 +57,20 @@ export class Preprocessor {
 
   }
 
+  public applyFragment(wgsl: string) {
+    this.code.fragment = this.code.fragment.replaceAll(
+      Preprocessor.fragmentMixin, 
+      wgsl + "\n" + Preprocessor.fragmentMixin
+    );
+  }
+  
   static setup(label: string, builder: Preprocessor) {
 
-    const fs = builder.code.fragment;
     const vs = builder.code.vertex;
+    const fs = builder.code.fragment
+      .replaceAll(Preprocessor.fragmentMixin, String())
+      .replaceAll(Preprocessor.materialMixin, String())
+      ;
 
     return {
       fragment: device.createShaderModule({

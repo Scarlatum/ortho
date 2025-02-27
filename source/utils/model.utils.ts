@@ -1,4 +1,4 @@
-import { mat4 } from "gl-matrix";
+import { Ortho } from "ortho";
 
 export class Model extends Float32Array {
 
@@ -6,7 +6,7 @@ export class Model extends Float32Array {
 
     super(gbuffer.size / Float32Array.BYTES_PER_ELEMENT);
 
-    mat4.identity(this);
+    Ortho.mat4.identity(this);
 
   }
 

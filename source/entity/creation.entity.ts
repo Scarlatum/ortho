@@ -1,9 +1,11 @@
-import { vec2 } from "gl-matrix";
+import utils from "../renderer/renderer.utils";
+
 import { ProceduredMaterial } from "../mesh/mesh.material";
-import { InstancesMesh, Mesh, MeshPayload } from "../mesh/mesh.model";
+import { InstancedMesh, Mesh, MeshPayload } from "../mesh/mesh.model";
 import { Wave } from "../mesh/parsers/waveform";
-import * as utils from "../renderer/renderer.utils";
-import { ShadowParams } from "../interfaces/drawable.interface";
+import { ShadowParams } from "../renderer/light/light.model";
+import { Drawable } from "../interfaces/drawable.interface";
+import { Texture } from "../renderer/texture.model";
 
 interface CreationRequirements {
   geometry: ReturnType<typeof Wave.parseTextFile>,
@@ -11,28 +13,47 @@ interface CreationRequirements {
   material: Nullable<ProceduredMaterial>,
 }
 
+export type TextureContainer = {
+  diffuse: Array<Texture>;
+  occlusion: Array<Texture>;
+  normals: Array<Texture>;
+};
+
 interface Assets {
-  textures: Nullable<Array<Record<string, Array<string>>>>,
+  textures: Nullable<Partial<TextureContainer>>,
   geometry: string | ReturnType<typeof Wave.parseTextFile>,
 }
 
-type InstancedQuality<T extends number> = T extends 1 ? Mesh : InstancesMesh
+type InstancedQuality<T extends number> = T extends 1 ? Mesh : InstancedMesh
+
+type CreationParams<S = {}, I extends number = 1> = {
+  state         : S,
+  instaces      : I,
+  shadow        : Partial<ShadowParams>,
+}
 
 export class Creation<State, const Instances extends number = 1> {
+
+  static defaultParams = {
+    state         : Object(),
+    instaces      : 1,
+    shadow        : Drawable.defaultShadowParams,
+  } satisfies CreationParams;
 
   public mesh: InstancedQuality<Instances>;
 
   constructor(
+    id: symbol,
     { geometry, material, texture }: CreationRequirements, 
-    shadowprop: ShadowParams,
+    shadow: Partial<ShadowParams>,
     private instances: Instances,
-    public state: Nullable<State> = null
+    public state: State = Object()
   ) {
 
     const data: MeshPayload = {
       material  : material,
-      vertexes  : Wave.constructBuffer(geometry, Wave.BufferType.Vertex),
       texture   : texture,
+      vertexes  : Wave.constructBuffer(geometry, Wave.BufferType.Vertex),
       uv        : Wave.constructBuffer(geometry, Wave.BufferType.UV),
       normals   : Wave.constructBuffer(geometry, Wave.BufferType.Normal),
     };
@@ -40,59 +61,45 @@ export class Creation<State, const Instances extends number = 1> {
     // ? Так как InstancesMesh наследуется от Mesh, то и в ручном касте типа тут особой потребности нет
     // ? Когда нибудь TS научиться работать с константными выражениями, но пока это лишь мои хотелки.
     this.mesh = this.instances === 1
-      ? new Mesh(data, shadowprop) as InstancedQuality<Instances>
-      : new InstancesMesh(data, shadowprop, instances);
+      ? new Mesh(id, data, shadow) as InstancedQuality<Instances>
+      : new InstancedMesh(id, data, shadow, instances);
       ;
     
   }
   
   static async create<const I extends number, S>(
-    assets: Assets,
-    customMaterial: Nullable<ProceduredMaterial> = null,
-    shadowprop: ShadowParams,
-    instaces: I = 1 as I,
-    state: Nullable<S> = null,
-    sizeMut?: vec2,
+    id              : symbol,
+    assets          : Assets,
+    customMaterial  : Nullable<ProceduredMaterial>,
+    params          ?: Partial<CreationParams<S,I>>,
   ) {
+
+    const { instaces, shadow, state } = params 
+      ? Object.assign(structuredClone(Creation.defaultParams), params)
+      : Creation.defaultParams; 
 
     let texture: GPUTexture;
 
-    if ( assets.textures ) {
+    if ( assets.textures?.diffuse?.length ) {
 
-      const [ first ] = await utils.createImageTexture(window.device, assets.textures);
+      const [ first ] = assets.textures.diffuse;
 
       texture = first.texture;
 
-      if ( sizeMut ) {
-        sizeMut[0] = first.w;
-        sizeMut[1] = first.h;
-      }
+    } 
+    
+    else texture = utils.createBaseTexture(device);
 
-    } else {
+    let geometry: Assets['geometry'] = typeof assets.geometry === "string" 
+      ? Wave.parseTextFile(assets.geometry) 
+      : assets.geometry
+      ;
 
-      texture = utils.createBaseTexture(window.device);
-
-    }
-
-    let geometry: Assets['geometry'];
-
-    if ( typeof assets.geometry === "string" ) {
-
-      geometry = Wave.parseTextFile(assets.geometry);
-
-      // if ( import.meta.env.DEV && geometry.buffers.vertex.length === 0 ) throw Error();
-
-    } else {
-
-      geometry = assets.geometry;
-
-    }
-
-    return new Creation({
+    return new Creation(id, {
       geometry: geometry,
       texture: texture,
       material: customMaterial,
-    }, shadowprop, instaces, state);
+    }, shadow, instaces as I, state as S);
 
   }
 

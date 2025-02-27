@@ -1,30 +1,26 @@
-import { Camera } from "../camera/camera.model";
 import { PostEffect } from "../../interfaces/postpass.interface";
+import { GBufferType } from "../renderer.contants";
 import { Renderer } from "../renderer.model";
 
 import shader from "../shaders/post/blur.wgsl?raw";
 import downsamplerShader from "../shaders/post/downsample.wgsl?raw";
-
-interface PassPayload {
-  camera: Camera;
-}
 
 export class BlurPass extends PostEffect {
 
   private shaderModuleH: GPUShaderModule;
   private pipelineH: GPURenderPipeline;
 
-  private HFrame: GPUTexture;
-  private params: GPUBuffer;
+  private downsampled: GPUTexture;
+  private uniform: GPUBuffer;
 
   constructor(
     private renderer: Renderer,
-    private camera: Camera,
+    private params: { iterations: number },
   ) {
 
     super();
 
-    this.shaderModule = window.device.createShaderModule({
+    this.shaderModule = device.createShaderModule({
       code: shader
     });
 
@@ -32,7 +28,7 @@ export class BlurPass extends PostEffect {
       code: downsamplerShader
     });
 
-    this.pipeline = window.device.createRenderPipeline({
+    this.pipeline = device.createRenderPipeline({
       layout: "auto",
       vertex: {
         entryPoint: "vertexKernel",
@@ -58,22 +54,26 @@ export class BlurPass extends PostEffect {
       },
     });
 
-    this.HFrame = device.createTexture({
+    this.downsampled = device.createTexture({
       label: "blur storage texture",
       format: Renderer.RENDER_FORMAT,
       size: {
-        width: this.renderer.context.canvas.width / 1.0,
-        height: this.renderer.context.canvas.height / 1.0,
+        width: this.renderer.width / 1.0,
+        height: this.renderer.height / 1.0,
       },
       sampleCount: 1,
-      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+      usage: GPUTextureUsage.RENDER_ATTACHMENT 
+        | GPUTextureUsage.TEXTURE_BINDING 
+        | GPUTextureUsage.COPY_DST,
     });
+
+    this.renderer.viewMap.set(this.downsampled , this.downsampled.createView())
 
     this.sampler = device.createSampler({
       magFilter: "linear"
     });
 
-    this.params = device.createBuffer({
+    this.uniform = device.createBuffer({
       size: Float32Array.BYTES_PER_ELEMENT * 4,
       usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.UNIFORM,
     });
@@ -82,53 +82,81 @@ export class BlurPass extends PostEffect {
 
   public async pass(frame: GPUTexture) {
 
-    device.queue.writeBuffer(this.params, 0, new Float32Array([
-      this.renderer.context.canvas.width,
-      this.renderer.context.canvas.height,
-      0,
+    const intencity = Math.sin(this.renderer.info.currentFrame / 60) * 0.5 + 0.5;
+
+    device.queue.writeBuffer(this.uniform, 0, new Float32Array([
+      this.renderer.width,
+      this.renderer.height,
+      intencity,
       1,
     ]));
 
-    const encoder = window.device.createCommandEncoder();
+    if ( intencity === 0.0 ) return;
 
-    const downscalepass = encoder.beginRenderPass({
-      colorAttachments: [{ loadOp: "load", storeOp: "store", view: this.HFrame.createView() }]
-    });
+    const encoder = device.createCommandEncoder();
 
-    downscalepass.setPipeline(this.pipelineH);
-    downscalepass.setBindGroup(0, device.createBindGroup({
-      layout: this.pipelineH.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: frame.createView() },
-      ]
-    }));
+    const views = { 
+      downsampled: this.renderer.viewMap.get(this.downsampled)!,
+      frame: frame.createView(),
+    };
 
-    downscalepass.draw(6);
-    downscalepass.end();
+    { // Downscale pass
 
-    const pass = encoder.beginRenderPass({
-      colorAttachments: [{ loadOp: "load", storeOp: "store", view: frame.createView() }]
-    });
+      const pass = encoder.beginRenderPass({
+        colorAttachments: [{ loadOp: "load", storeOp: "store", view: views.downsampled }]
+      });
+  
+      pass.setPipeline(this.pipelineH);
+      pass.setBindGroup(0, device.createBindGroup({
+        layout: this.pipelineH.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: views.frame },
+        ]
+      }));
+  
+      pass.draw(6);
+      pass.end();
 
-    pass.setPipeline(this.pipeline);
-    pass.setBindGroup(0, device.createBindGroup({
-      layout: this.pipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: this.HFrame.createView() },
-        { binding: 1, resource: this.sampler },
-        { binding: 2, resource: { buffer: this.params }}
-      ]
-    }));
+    }
 
-    pass.draw(6);
-    pass.end();
+    { // Blur pass
+      for ( let i = 0; i < this.params.iterations; i++ ) {
 
-    window.device.queue.submit([ encoder.finish() ]);
+        const pass = encoder.beginRenderPass({
+          colorAttachments: [{ 
+            view: views.frame, 
+            loadOp: "load", 
+            storeOp: "store"
+          }]
+        });
+    
+        pass.setPipeline(this.pipeline);
+        pass.setBindGroup(0, device.createBindGroup({
+          layout: this.pipeline.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: views.downsampled },
+            { binding: 1, resource: this.sampler },
+            { binding: 2, resource: { buffer: this.uniform }}
+          ]
+        }));
+    
+        pass.draw(6);
+        pass.end();
 
-  }
+        // encoder.copyTextureToTexture({
+        //   texture: frame
+        // }, {
+        //   texture: this.downsampled
+        // }, {
+        //   width: frame.width,
+        //   height: frame.height
+        // });
 
-  public static create(renderer: Renderer, payload: PassPayload): BlurPass {
-    return new BlurPass(renderer, payload.camera);
+      }
+    }
+
+    device.queue.submit([ encoder.finish() ]);
+
   }
 
 }

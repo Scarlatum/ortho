@@ -1,9 +1,4 @@
-const rotationMask = mat4x4<f32>(
-  0,1,1,0,
-  1,0,1,0,
-  1,1,0,0,
-  1,1,1,0,
-);
+const uv_offset = vec2f(0.5, -0.5);
 
 @vertex fn vertexKernel(
 
@@ -20,15 +15,6 @@ const rotationMask = mat4x4<f32>(
 
   let x: mat4x4f = transforms[visibility[instance]];
 
-  let transformation = view.perspective * view.camera * x;
-
-  let an = x * vec4f(vertexData, 1);
-
-  let light_distant   = directionLigth[0].perspective * directionLigth[0].camera * an;
-  let light_far       = directionLigth[1].perspective * directionLigth[1].camera * an;
-  let light_near      = directionLigth[2].perspective * directionLigth[2].camera * an;
-  let light_close     = directionLigth[3].perspective * directionLigth[3].camera * an;
-
   // Тут происходит некая дрянь просто из-за того, что я ленивый ублюдок
   // который не захотел передавать матрицы отдельно для каждого вида трансформаций
   let scaleFactor     = x[0][0] * x[0][0] + x[0][1] * x[0][1] + x[0][2] * x[0][2];
@@ -38,33 +24,34 @@ const rotationMask = mat4x4<f32>(
     x[2].xyz
   );
 
-  result.pos            = transformation * vec4f(vertexData, 1);
-  result.norm           = vec4f(normalize(rotationMatrix * normals), 1);
-  result.textureUV      = uv;
-  result.globalCoords   = x * vec4f(vertexData, 1);
+  result.world   = x * vec4f(vertexData, 1);
+  result.pos     = view.perspective * view.camera * result.world;
+  result.normals = vec4f(normalize(rotationMatrix * normals), 1);
+  result.uv      = uv;
+
+  let distant   = directionLigth[0].perspective * directionLigth[0].camera * result.world;
+  let far       = directionLigth[1].perspective * directionLigth[1].camera * result.world;
+  let near      = directionLigth[2].perspective * directionLigth[2].camera * result.world;
+  let close     = directionLigth[3].perspective * directionLigth[3].camera * result.world;
 
   result.directionLigthSpaceDistant = vec4(
-    light_distant.xy * vec2f(0.5, -0.5) + vec2f(0.5), 
-    light_distant.z, 
-    1
+    distant.xy * uv_offset + 0.5, 
+    distant.z, 1
   );
 
   result.directionLigthSpaceFar = vec4(
-    light_far.xy * vec2f(0.5, -0.5) + vec2f(0.5), 
-    light_far.z, 
-    1
+    far.xy * uv_offset + 0.5, 
+    far.z, 1
   );
 
   result.directionLigthSpaceNear = vec4(
-    light_near.xy * vec2f(0.5, -0.5) + vec2f(0.5), 
-    light_near.z, 
-    1
+    near.xy * uv_offset + 0.5, 
+    near.z, 1
   );
 
   result.directionLigthSpaceClose = vec4(
-    light_close.xy * vec2f(0.5, -0.5) + vec2f(0.5), 
-    light_close.z, 
-    1
+    close.xy * uv_offset + 0.5, 
+    close.z, 1
   );
 
   return result;

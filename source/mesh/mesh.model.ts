@@ -1,7 +1,9 @@
 import { mat4, vec3 } from "gl-matrix";
-import { Drawable, DrawableBuffers, RenderData, ShadowParams } from "../interfaces/drawable.interface";
+import { Drawable, DrawableBuffers, RenderData } from "../interfaces/drawable.interface";
 import { permutations } from "../utils/math.utils.ts";
 import { Model } from "../utils/model.utils.ts";
+import { ShadowParams } from "../renderer/light/light.model.ts";
+import { VertexArena } from "../renderer/renderer.model.ts";
 
 export const enum VERTEX_LAYOUT {
   ID,
@@ -24,31 +26,36 @@ export interface BoundingPoints<
   b: V;
 }
 
-export type MeshPayload = Omit<DereferencedObjectValues<RenderData>, "model">;
+export type MeshPayload = Omit<Deref<RenderData>, "model">;
+
+export const enum VertexLayoutSize {
+  FULL = 9,
+  REDUCED = 4,
+}
 
 export class Mesh extends Drawable {
 
+  static cache = new Map<Symbol, WeakRef<[ BoundingPoints<vec3>, Float32Array, Float32Array ]>>();
+
   static MAT4SIZE = 4 * 4;
-  static VERTEX_SIZE = 9;
+
+  static arenas: { full: VertexArena, reduced: VertexArena } = Object();
 
   public override readonly model: Model;
-  public vertexCount;
-  public id = Symbol(Math.random());
+  public override vertexCount;
+  
   public modelPointer: number = 0;
   public override data: RenderData;
   public override instances = 1; 
   public override buffers: DrawableBuffers = Object();
-  public override shadowParams: ShadowParams = {
-    cast: true,
-    recieve: false,
-  };
 
   public box: BoundingPoints<vec3>;
   public edges: Array<vec3>;
 
   constructor(
+    public id = Symbol("Default mesh symbol"),
     payload: MeshPayload,
-    shadowprop: ShadowParams,
+    shadow: Partial<ShadowParams>,
     visibilityBuffer = device.createBuffer({
       size: Uint32Array.BYTES_PER_ELEMENT * 1,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
@@ -56,6 +63,8 @@ export class Mesh extends Drawable {
   ) {
 
     super();
+
+    Object.assign(this.shadowParams, shadow);
 
     this.data = {
       vertexes  : new WeakRef(payload.vertexes),
@@ -68,61 +77,76 @@ export class Mesh extends Drawable {
     this.vertexCount  = payload.vertexes.length / 3;
 
     { // Set GPU Buffers
-
-      this.buffers.vertex = device.createBuffer({
-        size: this.vertexCount * Mesh.VERTEX_SIZE * Float32Array.BYTES_PER_ELEMENT,
-        usage: GPUBufferUsage.VERTEX
-          | GPUBufferUsage.COPY_DST
-      });
   
       this.buffers.tranformation = device.createBuffer({
         size: Mesh.MAT4SIZE * Float32Array.BYTES_PER_ELEMENT,
         usage: GPUBufferUsage.VERTEX
           | GPUBufferUsage.COPY_DST
           | GPUBufferUsage.STORAGE,
-        mappedAtCreation: true
       });
   
       this.buffers.params = device.createBuffer({
         size: Uint32Array.BYTES_PER_ELEMENT * 3,
-        usage: GPUBufferUsage.UNIFORM,
-        mappedAtCreation: true,
+        usage: GPUBufferUsage.UNIFORM 
+          | GPUBufferUsage.COPY_DST,
       });
   
       this.buffers.visibility = visibilityBuffer;
-
-      { // ? Populate the transforamtion buffer with an identity values to prevent mesh to pop out on a vertex stage.
-
-        mat4.identity(new Float32Array(this.buffers.tranformation.getMappedRange()));
-
-        this.buffers.tranformation.unmap();
-
-      }
 
     }
 
     this.model = new Model(this.buffers.tranformation);
 
-    const vbo = new Float32Array(this.vertexCount * Mesh.VERTEX_SIZE);
+    let fullBuffer: Float32Array;
+    let reducedBuffer: Float32Array;
 
-    this.box    = Mesh.constructVertexData(this, vbo);
-    this.edges  = permutations(this.box.a, this.box.b);
+    { // Vertex data
 
-    device.queue.writeBuffer(this.buffers.vertex, 0, vbo);
+      const cachedData = Mesh.cache.get(id)?.deref();
 
-    new Uint32Array(this.buffers.params.getMappedRange()).set([
-      payload.material?.id || 0,
-      Number(this.shadowParams.cast = shadowprop.cast),
-      Number(this.shadowParams.recieve = shadowprop.recieve),
-    ]);
+      if ( cachedData ) {
+  
+        [ this.box, fullBuffer, reducedBuffer ] = cachedData;
+  
+      } else {
+  
+        fullBuffer = new Float32Array(this.vertexCount * VertexLayoutSize.FULL);
+        reducedBuffer = new Float32Array(this.vertexCount * VertexLayoutSize.REDUCED)
+  
+        this.box = Mesh.constructVertexData(this, fullBuffer, reducedBuffer);
+  
+        Mesh.cache.set(id, new WeakRef([
+          this.box,
+          fullBuffer,
+          reducedBuffer,
+        ]));
+  
+      }
+  
+      this.edges = permutations(this.box.a, this.box.b);
 
-    this.buffers.params.unmap();
+    }
+
+    { // GBuffers
+
+      device.queue.writeBuffer(this.buffers.tranformation, 0, new Float32Array(mat4.create()));
+      device.queue.writeBuffer(this.buffers.params, 0, new Uint32Array([
+        payload.material?.id || 0,
+        Number(this.shadowParams.cast),
+        Number(this.shadowParams.recieve),
+      ]));
+
+      Mesh.arenas.full.add(id, fullBuffer);
+      Mesh.arenas.reduced.add(id, reducedBuffer);
+
+    }
 
   }
-
+  
   static constructVertexData(
-    mesh: Mesh,
-    out: Float32Array,
+    mesh    : Mesh,
+    full    : Float32Array,
+    reduced : Float32Array,
   ) {
 
     const vertexes = mesh.data.vertexes.deref();
@@ -131,7 +155,8 @@ export class Mesh extends Drawable {
 
     if ( !vertexes ) throw Error();
 
-    let offset = 0;
+    let offset_full = 0;
+    let offset_reduced = 0;
 
     const min = [
       0 + Number.MAX_SAFE_INTEGER,
@@ -156,24 +181,24 @@ export class Mesh extends Drawable {
       vec3.min(min, position, min);
       vec3.max(max, position, max);
 
-      out[offset] = mesh.modelPointer;
-
-      out[offset + 1] = position[0]; 
-      out[offset + 2] = position[1]; 
-      out[offset + 3] = position[2];
+      reduced[offset_reduced + 0] = full[offset_full + 0] = mesh.modelPointer;
+      reduced[offset_reduced + 1] = full[offset_full + 1] = position[0]; 
+      reduced[offset_reduced + 2] = full[offset_full + 2] = position[1]; 
+      reduced[offset_reduced + 3] = full[offset_full + 3] = position[2];
 
       if ( normals ) {
-        out[offset + 4] = normals[v * 3 + 0]
-        out[offset + 5] = normals[v * 3 + 1]
-        out[offset + 6] = normals[v * 3 + 2]
+        full[offset_full + 4] = normals[v * 3 + 0]
+        full[offset_full + 5] = normals[v * 3 + 1]
+        full[offset_full + 6] = normals[v * 3 + 2]
       }
 
       if ( uv ) {
-        out[offset + 7] = uv?.[v * 2 + 0];
-        out[offset + 8] = uv?.[v * 2 + 1];
+        full[offset_full + 7] = uv?.[v * 2 + 0];
+        full[offset_full + 8] = uv?.[v * 2 + 1];
       }
 
-      offset += Mesh.VERTEX_SIZE;
+      offset_full += VertexLayoutSize.FULL;
+      offset_reduced += VertexLayoutSize.REDUCED;
 
     }
 
@@ -184,55 +209,69 @@ export class Mesh extends Drawable {
 
   }
 
-  static getVertexLayout(): GPUVertexBufferLayout {
-    return {
-      arrayStride: Float32Array.BYTES_PER_ELEMENT * Mesh.VERTEX_SIZE,
-      attributes: [
-        // ? Оставляю это лишь для того, что в последствии буду батчить ститические и динамические меши вместе
-        { // Transforamtion ID
-          format: "float32",
-          offset: Float32Array.BYTES_PER_ELEMENT * 0,
-          shaderLocation: 0
-        },
-        { // Vertex Data
-          format: "float32x3",
-          offset: Float32Array.BYTES_PER_ELEMENT * 1,
-          shaderLocation: 1,
-        },
-        { // Normals Data
+  // TODO: Make simplified layout for shadow pass w/o normals and UV
+  static getVertexLayout(simplified: boolean = false): GPUVertexBufferLayout {
+
+    const attributes = new Set<GPUVertexAttribute>([
+      // ? Оставляю это лишь для того, что в последствии буду батчить ститические и динамические меши вместе
+      { // Transforamtion ID
+        format: "float32",
+        offset: Float32Array.BYTES_PER_ELEMENT * 0,
+        shaderLocation: 0
+      },
+      { // Vertex Data
+        format: "float32x3",
+        offset: Float32Array.BYTES_PER_ELEMENT * 1,
+        shaderLocation: 1,
+      },
+    ]);
+
+    if ( simplified === false ) {
+      attributes.add({ // Normals Data
           format: "float32x3",
           offset: Float32Array.BYTES_PER_ELEMENT * 4,
           shaderLocation: 2,
-        },
-        { // UV data
-          format: "float32x2",
-          offset: Float32Array.BYTES_PER_ELEMENT * 7,
-          shaderLocation: 3,
-        },
-      ]
+      });
+      attributes.add({ // UV data
+        format: "float32x2",
+        offset: Float32Array.BYTES_PER_ELEMENT * 7,
+        shaderLocation: 3,
+      });
+    }
+
+    const size = simplified ? VertexLayoutSize.REDUCED : VertexLayoutSize.FULL;
+
+    return {
+      arrayStride: size * Float32Array.BYTES_PER_ELEMENT,
+      attributes,
     };
   }
 
 }
 
-export class InstancesMesh extends Mesh {
+export class InstancedMesh extends Mesh {
+
+  override model;
 
   public models: Array<Float32Array>;
   public visibilityIndexes: Uint8Array;
 
   constructor(
+    id: symbol,
     data: MeshPayload,
-    shadowprop: ShadowParams,
+    shadow: Partial<ShadowParams>,
     public override readonly instances: number,
   ) {
 
-    super(data, shadowprop, device.createBuffer({
+    super(id, data, shadow, device.createBuffer({
       size  : Uint32Array.BYTES_PER_ELEMENT * instances,
       usage : GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
     }));
 
     this.models = Array.from({ length: instances }, () => mat4.create() as Float32Array);
     this.visibilityIndexes = new Uint8Array(instances).fill(1);
+
+    this.model = this.models[0] as Model;
 
     this.buffers.tranformation = device.createBuffer({
       size: Mesh.MAT4SIZE * instances * Float32Array.BYTES_PER_ELEMENT,
@@ -241,8 +280,8 @@ export class InstancesMesh extends Mesh {
         | GPUBufferUsage.STORAGE,
     });
 
-  }  
-
+  } 
+  
   public * writeModels(): Generator<[ Float32Array, number ]> {
 
     const stride = Mesh.MAT4SIZE;

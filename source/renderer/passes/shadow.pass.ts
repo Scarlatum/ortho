@@ -1,9 +1,10 @@
 import { vec3 } from "gl-matrix";
-import * as utils from "../renderer.utils";
+import utils from "../renderer.utils";
 
+import { Mesh } from "../../mesh/mesh.model";
 import { Drawable } from "../../interfaces/drawable.interface";
 import { SceneInterface } from "../../interfaces/scene.interface";
-import { DirectionLight, LightCascade } from "../light/light.model";
+import { DirectionLight } from "../light/light.model";
 
 import { Renderer } from "../renderer.model";
 import { Observer } from "../camera/camera.model";
@@ -12,14 +13,14 @@ import shader from "../shaders/light.wgsl?raw";
 
 export class ShadowPass {
 
-  public lightDir = new Float32Array(3) as vec3;
+  public lightDir = new Float32Array(3);
   public lightsBuffer: GPUBuffer;
-  public views = new WeakMap<GPUTexture, GPUTextureView>();
-  public bindgroup: Nullable<GPUBindGroup> = null;
+  public bindgroup: GPUBindGroup;
   private pipeline: GPURenderPipeline;
   private temporalTexture: GPUTexture;
-  private bindgroupMap = new WeakMap<Drawable, Array<GPUBindGroup>>();
+  private bundles = new WeakMap<Drawable, Array<GPURenderBundle>>();
   private lightDirectionBuffer: GPUBuffer;
+  private sunViews = Array<GPUTextureView>();
 
   private readonly colorAttachment : GPURenderPassColorAttachment;
 
@@ -33,7 +34,7 @@ export class ShadowPass {
     this.pipeline = utils.createBasePipeline({
       fragment: module,
       vertex: module,
-    });
+    }, undefined, true);
 
     this.temporalTexture = device.createTexture({
       label: "TEMP TEXTURE",
@@ -48,7 +49,7 @@ export class ShadowPass {
     });
 
     this.lightDirectionBuffer = device.createBuffer({
-      size: 3 * Float32Array.BYTES_PER_ELEMENT,
+      size: this.lightDir.buffer.byteLength,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     });
 
@@ -69,31 +70,49 @@ export class ShadowPass {
       view: this.temporalTexture.createView()
     };
 
-  }
-
-  private static constructBindgroup(
-    pipeline: GPURenderPipeline,
-    light: DirectionLight,
-    x: Drawable, 
-    map: WeakMap<Drawable, Array<GPUBindGroup>>,
-  ) {
-
-    const bindgroups: Array<GPUBindGroup> = [];
-
-    for ( let i = LightCascade.Distant; i <= LightCascade.Close; i++ ) {
-      bindgroups[i] = device.createBindGroup({
-        layout: pipeline.getBindGroupLayout(0),
-        label: "Scene Bindgroup",
-        entries: [
-          { binding: 0, resource: { buffer: light.observers[i].gbuffer } },
-          { binding: 1, resource: { buffer: x.buffers.tranformation } },
-        ]
-      })
+    for ( let i = 0; i < DirectionLight.LEVELS; i++ ) {
+      this.sunViews[i] = scene.sun.texture.createView({ 
+        arrayLayerCount : 1,
+        baseArrayLayer  : DirectionLight.LEVELS - i - 1,
+      });
     }
 
-    map.set(x, bindgroups);
+  }
 
-    return bindgroups;
+  private createBundle(x: Drawable) {
+
+    const bundles = Array<GPURenderBundle>(DirectionLight.LEVELS);
+
+    for ( let i = 0; i < DirectionLight.LEVELS; i++ ) {
+
+      const encoder = device.createRenderBundleEncoder({
+        colorFormats: [ Renderer.RENDER_FORMAT ],
+        depthStencilFormat: Renderer.DEPTH_FORMAT,
+        sampleCount: 1,
+      });
+
+      const { buffer, pointer } = Mesh.arenas.reduced.get(x.id);
+
+      encoder.setPipeline(this.pipeline);
+      encoder.setVertexBuffer(0, buffer, pointer.address, pointer.size);
+      encoder.setBindGroup(0, device.createBindGroup({
+        layout: this.pipeline.getBindGroupLayout(0),
+        label: "Scene Bindgroup",
+        entries: [
+          { binding: 0, resource: { buffer: this.scene.sun.observers[i].gbuffer } },
+          { binding: 1, resource: { buffer: x.buffers.tranformation } },
+        ]
+      }));
+
+      encoder.draw(x.vertexCount, x.instances);
+      
+      bundles[i] = encoder.finish()
+
+    }
+
+    this.bundles.set(x, bundles)
+
+    return bundles;
 
   }
 
@@ -104,17 +123,14 @@ export class ShadowPass {
 
     const sun = this.scene.sun;
 
-    vec3.sub(this.lightDir, 
-      sun.observers[LightCascade.Distant].position, 
-      sun.observers[LightCascade.Distant].target
-    );
+    vec3.negate(this.lightDir, sun.observer.direction);
 
     device.queue.writeBuffer(
       this.lightDirectionBuffer, 0, 
-      vec3.normalize(this.lightDir, this.lightDir) as Float32Array
+      this.lightDir
     );
 
-    for ( let i = 0; i <= LightCascade.Close; i++ ) {
+    for ( let i = DirectionLight.CASCADE_OFFSET; i < DirectionLight.LEVELS; i++ ) {
 
       const observer = sun.observers[i];
 
@@ -122,37 +138,38 @@ export class ShadowPass {
         observer.gbuffer, 0,
         this.lightsBuffer, Observer.BUFFER_TYPE.BYTES_PER_ELEMENT * Observer.BUFFER_SIZE * i,
         observer.gbuffer.size
-      );
-    
+      ); 
+         
       const pass = encoder.beginRenderPass({
         colorAttachments: [this.colorAttachment],
         depthStencilAttachment: {
-          view: sun.texture.createView({ 
-            arrayLayerCount : 1,
-            baseArrayLayer  : LightCascade.Close - i,
-          }),
+          view: this.sunViews[i],
           depthLoadOp: "clear",
           depthStoreOp: "store",
           depthClearValue: 1,
         },
       });
 
-      pass.setPipeline(this.pipeline);
+      const bundleQueue = new Set<GPURenderBundle>();
 
+      // TODO: Frustrum culling
       for (const x of drawQueue) {
 
         if ( x.shadowParams.cast === false ) continue;
 
-        let bindgroup = this.bindgroupMap.get(x)?.[i];
+        const onCascadeGroup = x.shadowParams.cascade & DirectionLight.layout[i];
 
-        bindgroup ||= ShadowPass.constructBindgroup(this.pipeline, sun, x, this.bindgroupMap)[i];
+        if ( onCascadeGroup === 0 ) continue;
 
-        pass.setVertexBuffer(0, x.buffers.vertex);
-        pass.setBindGroup(0, bindgroup);
-        pass.draw(x.vertexCount, x.instances);
+        let bundles = this.bundles.get(x);
+
+        if ( !bundles ) this.bundles.set(x, bundles = this.createBundle(x));
+
+        bundleQueue.add(bundles[i]);
 
       }
 
+      pass.executeBundles(bundleQueue);
       pass.end();
 
     }

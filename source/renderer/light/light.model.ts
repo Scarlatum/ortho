@@ -1,28 +1,35 @@
-import { Renderer } from "../renderer.model";
+import { Ortho, Renderer } from "ortho"
 import { Observer } from "../camera/camera.model";
-import { mat4 } from "gl-matrix";
 
 export const enum LightCascade {
-  Distant,
-  Far,
-  Near,
-  Close,
+  Distant = 1 << 1,
+  Far = 1 << 2,
+  Near = 1 << 3,
+  Close = 1 << 4,
 }
+
+export interface ShadowParams {
+  recieve: boolean;
+  cast: boolean;
+  cascade: LightCascade
+};
 
 export class DirectionLight {
 
-  // ! DirectX12 частенько любит выставлять ResourceBarrier между проходами, 
-  // ! и если не повезёт ( Привет PCI шина ), то он может отъесть значительную часть кадра при больших объёмах текстур.
-  // ! Скорее всего, не смотря на моё желание обойтись одной картой теней в 4-8к расширением для всего окружения,
-  // ! Direct заставит меня делать каскадную карту теней.
-  // ? Как вариант делать проходы с тенями асинхронными, но это нужно проверять на итог по визуалу.
-  // TODO: Скорее всего, нужно будет разбивать это на 3-4 каскадных теней по 1024. 
-  // TODO: Тратить 10-20% от производительности явно нет желания.
+  static readonly LEVELS = Math.log2(LightCascade.Close);
   static readonly RESOLUTION = 1024;
+  static readonly CASCADE_OFFSET = 0;
+  static readonly DEFAULT_CASCADE_FLAG: LightCascade = LightCascade.Distant | LightCascade.Far | LightCascade.Near | LightCascade.Close;
   static readonly shadowMapResolution = {
     width: DirectionLight.RESOLUTION,
     height: DirectionLight.RESOLUTION
   };
+  static readonly layout = [
+    LightCascade.Distant,
+    LightCascade.Far,
+    LightCascade.Near,
+    LightCascade.Close,
+  ] as const;
 
   public readonly texture: GPUTexture;
   public readonly observers = Array(4) as [ Observer, Observer, Observer, Observer ];
@@ -32,29 +39,34 @@ export class DirectionLight {
     this.texture = device.createTexture({
       label     : "Shadow Map",
       format    : Renderer.DEPTH_FORMAT,
-      size      : { depthOrArrayLayers: 4, ...DirectionLight.shadowMapResolution },
+      size      : { depthOrArrayLayers: DirectionLight.LEVELS, ...DirectionLight.shadowMapResolution },
       usage     : GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     });
 
-    for ( let i = LightCascade.Distant; i <= LightCascade.Close; i++ ) {
+    for ( let i = 0; i < DirectionLight.LEVELS; i++ ) {
 
       const res = 512 >> 2 * i;
 
       this.observers[i] = new Observer(this.observers[i - 1]);
 
-      mat4.ortho(
+      Ortho.mat4.ortho(
         this.observers[i].projection,
-        res * -1,
+        -res,
         res,
-        res * -1,
+        -res,
         res,
-        -1000,
-        500,
+        -Observer.FAR_POINT * 2,
+        Observer.FAR_POINT * 2,
       );
 
     }
 
-    this.observers.at(-1)?.update();
+    this.observer.update();
 
   }
+
+  get observer() {
+    return this.observers[DirectionLight.LEVELS - 1];
+  }
+
 }

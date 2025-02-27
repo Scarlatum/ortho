@@ -5,28 +5,43 @@ struct VertexOut {
 
 struct Params {
   res: vec2f,
-  dir: vec2f,
+  intencity: f32,
 }
 
 @group(0) @binding(0) var frame: texture_2d<f32>;
 @group(0) @binding(1) var smp: sampler;
 @group(0) @binding(2) var<uniform> params: Params;
 
+const kernel = array<vec2f, 9>(
+  vec2f(-1, 1),vec2f( 0, 1),vec2f( 1, 1),
+  vec2f(-1, 0),vec2f( 0, 0),vec2f( 1, 0),
+  vec2f(-1,-1),vec2f( 0,-1),vec2f( 1,-1),
+);
+
+// const kernel_large = array<vec2f, 25>(
+//   vec2f(-4, 4),vec2f(-2, 4),vec2f( 0, 4),vec2f( 2, 4),vec2f( 4, 4),
+//   vec2f(-4, 2),vec2f(-2, 2),vec2f( 0, 2),vec2f( 2, 2),vec2f( 4, 2),
+//   vec2f(-4, 0),vec2f(-2, 0),vec2f( 0, 0),vec2f( 2, 0),vec2f( 4, 0),
+//   vec2f(-4,-2),vec2f(-2,-2),vec2f( 0,-2),vec2f( 2,-2),vec2f( 4,-2),
+//   vec2f(-4,-4),vec2f(-2,-4),vec2f( 0,-4),vec2f( 2,-4),vec2f( 4,-4),
+// );
+
+const gaussian_weights_3x3 = array<f32, 9>(
+  0.03125, 0.06250, 0.03125, 
+  0.12500, 0.50000, 0.12500, 
+  0.03125, 0.06250, 0.03125,
+);
+
+const vertexes = array<vec2f,6>(
+  vec2f(-1.0, -1.0), vec2f( 1.0, -1.0), vec2f( 1.0,  1.0),
+  vec2f( 1.0,  1.0), vec2f(-1.0,  1.0), vec2f(-1.0, -1.0),
+);
+
 @vertex fn vertexKernel(
   @builtin(vertex_index) index: u32
 ) -> VertexOut {
 
   var result: VertexOut;
-
-  // Create array fullscreen trianlge
-  var vertexes = array<vec2f,6>(
-    vec2f(-1.0, -1.0),
-    vec2f( 1.0, -1.0),
-    vec2f( 1.0,  1.0),
-    vec2f( 1.0,  1.0),
-    vec2f(-1.0,  1.0),
-    vec2f(-1.0, -1.0),
-  );
 
   result.pos = vec4f(vertexes[index], 0.0, 1.0);
   result.uv = vertexes[index] * vec2f(0.5,-0.5) + 0.5;
@@ -39,30 +54,18 @@ struct Params {
   in: VertexOut
 ) -> @location(0) vec4<f32> {
 
-  let px = vec2f(1.0) / params.res;
+  let px = vec2f(1.0) / params.res * params.intencity;
 
-  var value = vec3f(0);
+  var value = vec3f(0.0);
 
-  value += textureSample(frame, smp, in.uv + px * vec2f(0,0)).rgb;
-  value += textureSample(frame, smp, in.uv + px * vec2f(2,0)).rgb;
-  value += textureSample(frame, smp, in.uv + px * vec2f(4,0)).rgb;
-  value += textureSample(frame, smp, in.uv + px * vec2f(6,0)).rgb;
+  for ( var i = 0; i < 9; i++ ) {
 
-  value += textureSample(frame, smp, in.uv + px * vec2f(1,1)).rgb;
-  value += textureSample(frame, smp, in.uv + px * vec2f(3,1)).rgb;
-  value += textureSample(frame, smp, in.uv + px * vec2f(5,1)).rgb;
-  value += textureSample(frame, smp, in.uv + px * vec2f(7,1)).rgb;
+    let coords = in.uv + px * kernel[i];
+    
+    value += textureSample(frame, smp, coords).rgb / 9.0;
 
-  value += textureSample(frame, smp, in.uv + px * vec2f(0,2)).rgb;
-  value += textureSample(frame, smp, in.uv + px * vec2f(2,2)).rgb;
-  value += textureSample(frame, smp, in.uv + px * vec2f(4,2)).rgb;
-  value += textureSample(frame, smp, in.uv + px * vec2f(6,2)).rgb;
+  }
 
-  value += textureSample(frame, smp, in.uv + px * vec2f(1,3)).rgb;
-  value += textureSample(frame, smp, in.uv + px * vec2f(3,3)).rgb;
-  value += textureSample(frame, smp, in.uv + px * vec2f(5,3)).rgb;
-  value += textureSample(frame, smp, in.uv + px * vec2f(7,3)).rgb;
-
-  return vec4f(value / 16, 1.0);
+  return vec4f(value, 1);
 
 }

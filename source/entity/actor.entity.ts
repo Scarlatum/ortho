@@ -1,4 +1,5 @@
 // import { SceneInterface } from "../interfaces/scene.interface";
+import { SceneInterface } from "../interfaces/scene.interface";
 import { Axis, Camera } from "../renderer/camera/camera.model";
 import { clampedSinEasing } from "../utils/easing.utils";
 
@@ -9,6 +10,7 @@ export class Actor {
   public maxSpeed = 3;
   public acceleration = 0;
   public motionState = false;
+  public camera: Camera;
 
   public buttons: Buttons = {
     "KeyW": false,
@@ -17,8 +19,12 @@ export class Actor {
     "KeyA": false,
   };
 
-  constructor(public camera: Camera) {
+  constructor({ renderer }: SceneInterface) {
+
+    this.camera = new Camera(renderer.width / renderer.height)
+
     this.applyListeners(window);
+
   }
 
   get movementSpeed(): number {
@@ -46,7 +52,7 @@ export class Actor {
       this.camera.movementHandler([
         0.00,
         0.00,
-        Math.sign(e.deltaY) * -1,
+        Math.sign(e.deltaY) * -0.15,
       ]);
     } else {
       this.camera.updatePerspective(this.camera.fov + Math.sign(e.deltaY));
@@ -89,11 +95,36 @@ export class Actor {
 
     target.addEventListener("wheel", (e) => {
       this.mouseWheelHandler(e as WheelEvent);
-    });
+    }, { passive: true });
 
     target.addEventListener("mousemove", (e) => {
       this.mouseMoveHandler(e as MouseEvent);
     });
+
+    {
+
+      let last: Nullable<Touch> = null;
+
+      (target as Window).addEventListener("touchmove", event => {
+  
+        const current = event.targetTouches[0];
+  
+        if ( last ) {
+          this.camera.rotate([
+            [ Axis.X, (last.screenX - current.screenX) * (Math.PI / 180) ],
+            [ Axis.Y, (last.screenY - current.screenY) * (Math.PI / 180) ],
+          ]);
+        }
+  
+        last = event.targetTouches[0];
+  
+      }, { passive: true });
+  
+      (target as Window).addEventListener("touchend", () => {
+        last = null;
+      });
+
+    }
 
   }
 

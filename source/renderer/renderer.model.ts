@@ -1,22 +1,44 @@
+import { type SceneInterface } from "../interfaces/scene.interface";
+import { type PostEffect } from "../interfaces/postpass.interface";
+
 import { MaterialRepository } from "./renderer.material";
-
 import { Preprocessor } from "../utils/preprocessor.utils";
+import { DefaultShader } from "./renderer.utils"
 
-import { SceneInterface } from "../interfaces/scene.interface";
-import { PostEffect } from "../interfaces/postpass.interface";
+import { MSAA, GBufferType } from "./renderer.contants";
+import { Mesh, VertexLayoutSize } from "../mesh/mesh.model";
 
-// Shader modules 
-import s_utils from "./shaders/utils.wgsl?raw";
-import s_constants from "./shaders/base/constants.wgsl?raw";
-import s_structs from "./shaders/base/structs.wgsl?raw";
-import s_bindings from "./shaders/base/bindings.wgsl?raw";
-import s_vertex from "./shaders/base/vertex.wgsl?raw";
-import s_fragment from "./shaders/base/fragment.wgsl?raw";
+export class VertexArena {
 
-// Previews
-// import { TexturePreview } from "../renderer/preview";
+  private layout = new WeakMap<Symbol, Pointer>();
+  private offset = 0;
 
-export const enum MSAA { NONE = 1, X4 = 4, X8 = 8, X16 = 16 };
+  constructor(private buffer: GPUBuffer) {
+
+  }
+
+  public add(id: Symbol, data: Float32Array) {
+
+    device.queue.writeBuffer(this.buffer, this.offset, data);
+
+    const ptr: Pointer = {
+      address: this.offset,
+      size: data.byteLength
+    } 
+
+    this.layout.set(id, ptr);
+
+    this.offset += data.byteLength;
+    
+    return ptr;
+
+  }
+
+  public get(id: Symbol) {
+    return { buffer: this.buffer, pointer: this.layout.get(id)! }
+  }
+
+}
 
 export class Renderer {
 
@@ -26,7 +48,6 @@ export class Renderer {
   static readonly RENDER_FORMAT: GPUTextureFormat = navigator.gpu.getPreferredCanvasFormat();
   static readonly TIME_MEASURE = import.meta.env.DEV;
 
-  // private preview: TexturePreview;
   public materials = new MaterialRepository();
 
   public info = {
@@ -36,81 +57,71 @@ export class Renderer {
     timestampPrev : 0,
   };
 
-  public msaa: MSAA = MSAA.X4;
-  public onResizeHooks: Set<(...args: any) => any> = new Set();
-  public framedrop: boolean = false;
-  public scenes = Array<SceneInterface>();
-  public currentSceneIndex = 0;
-  public sampler: GPUSampler;
-  public depthBuffer: GPUTexture;
-  public frameBuffer: GPUTexture;
-  public normalBuffer: GPUTexture;
-  public baseUniformBuffer: GPUBuffer;
-  public preprocessor: Preprocessor;
-  public postPasses = new Set<PostEffect>();
-  public compSampler: GPUSampler;
+  protected scenes = Array<SceneInterface>();
+  protected postPasses = new Set<PostEffect>();
 
-  public viewsMap = new WeakMap<GPUTexture, GPUTextureView>();
+  public preprocessor = new Preprocessor(DefaultShader);
+  public gbuffers = Array<GPUTexture>(3);
+  public msaa = MSAA.X4;
+  public onResizeHooks: Set<(...args: any) => any> = new Set();
+  public drop = false;
+  public currentScene: Nullable<SceneInterface> = null;
+  public uniformBuffer: GPUBuffer;
+  public viewMap = new WeakMap<GPUTexture, GPUTextureView>();
 
   constructor(
     public device: GPUDevice,
     public context: GPUCanvasContext,
+    public vertexArenaSize: number = 80_000,
   ) {
 
-    this.sampler = device.createSampler({
-      magFilter: "nearest",
-			minFilter: "linear",
-    });
-
-    this.compSampler = device.createSampler({
-      compare: "less",
-      minFilter: "nearest",
-      magFilter: "nearest",
-    });
-
     context.configure({
-      device: device,
+      device,
       format: Renderer.RENDER_FORMAT,
       alphaMode: "premultiplied",
       usage: GPUTextureUsage.RENDER_ATTACHMENT 
         | GPUTextureUsage.COPY_DST
+        | GPUTextureUsage.COPY_SRC
         | GPUTextureUsage.TEXTURE_BINDING
-        ,
     });
 
-    this.preprocessor = new Preprocessor({
-      constants: s_constants,
-      bindings: s_bindings,
-      structs: s_structs,
-      utils: s_utils,
-      kernel: {
-        fragment: s_fragment,
-        vertex: s_vertex,
-      }
-    });
-
-    this.depthBuffer = this.updateDepthTexture();
-    this.frameBuffer = this.updateFrameBuffer();
-    this.normalBuffer = this.updateNormalBuffer();
-
-    this.baseUniformBuffer = device.createBuffer({
-      size: Float32Array.BYTES_PER_ELEMENT * 8,
+    this.uniformBuffer = device.createBuffer({
+      size: Float32Array.BYTES_PER_ELEMENT * 32,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
-    // this.preview = new TexturePreview();
+    { // Setup static mesh properties
 
-    this.onResizeHooks.add(() => this.onResize());
+      Mesh.arenas.full = new VertexArena(device.createBuffer({
+        label: "Vertex Arena :: Full",
+        size: vertexArenaSize * VertexLayoutSize.FULL * Float32Array.BYTES_PER_ELEMENT,
+        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+      }));
+
+      Mesh.arenas.reduced = new VertexArena(device.createBuffer({
+        label: "Vertex Arena :: Reduced",
+        size: vertexArenaSize * VertexLayoutSize.REDUCED * Float32Array.BYTES_PER_ELEMENT,
+        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+      }));
+
+    }
+
+    this.onResizeHooks.add(() => this.onScreenResize());
+
+    this.updateBuffers();
 
     window.addEventListener("resize", () => {
       for ( const cb of this.onResizeHooks ) cb();
     });
 
   }
-  
 
-  get currentScene() {
-    return this.scenes[ this.currentSceneIndex ];
+  get width() {
+    return this.context.canvas.width;
+  }
+
+  get height() {
+    return this.context.canvas.height; 
   }
 
   static async getSetup(view: HTMLCanvasElement) {
@@ -119,12 +130,7 @@ export class Renderer {
 
     if (!adapter) throw Error();
 
-    const device = await adapter.requestDevice({
-      requiredFeatures: [
-        "bgra8unorm-storage",
-        "timestamp-query",
-      ]
-    });
+    const device = await adapter.requestDevice();
 
     if (!device) throw Error();
 
@@ -136,100 +142,77 @@ export class Renderer {
 
     if (!context) throw Error();
 
-    globalThis.device = device;
-    globalThis.adapter = adapter;
-    globalThis.context = context;
-
-    return [ adapter, device, context ] as const;
+    return [
+      globalThis.device   = device,
+      globalThis.adapter  = adapter,
+      globalThis.context  = context,
+    ] as const;
 
   }
 
-  private onResize() {
+  private updateBuffers() {
+    for (let type = GBufferType.Frame; type <= GBufferType.Normal; type++) {
+      this.gbuffers[ type ] = this.updateTexture(type);
+    }
+  }
+
+  private onScreenResize() {
 
     const { height, width } = getComputedStyle(this.context.canvas as HTMLCanvasElement);
 
     this.context.canvas.width = parseInt(width);
     this.context.canvas.height = parseInt(height);
 
-    this.depthBuffer = this.updateDepthTexture();
-    this.frameBuffer = this.updateFrameBuffer();
-    this.normalBuffer = this.updateNormalBuffer();
+    this.updateBuffers();
 
   }
 
-  private updateNormalBuffer(): any {
+  private updateTexture(type: GBufferType) {
 
-    const prev = this.normalBuffer;
+    const previous = this.gbuffers[type];
 
-    const texture = this.device.createTexture({
-      label: "Normal Texture",
+    const sharedDescriptor = {
       sampleCount: this.msaa,
-      size: {
-        width: this.context.canvas.width,
-        height: this.context.canvas.height,
-        depthOrArrayLayers: 1,
-      },
-      format: Renderer.RENDER_FORMAT,
       dimension: "2d",
-      usage: GPUTextureUsage.RENDER_ATTACHMENT
-        | GPUTextureUsage.TEXTURE_BINDING
-      ,
-    });
-
-    if (prev instanceof GPUTexture) prev.destroy();
-
-    this.viewsMap.set(texture, texture.createView())
-
-    return texture;
-
-  }
-
-  private updateDepthTexture() {
-
-    const prev = this.depthBuffer;
-    const texture = this.device.createTexture({
-      label: "Depth Texture",
-      sampleCount: this.msaa,
       size: {
-        width: this.context.canvas.width,
-        height: this.context.canvas.height,
-        depthOrArrayLayers: 1,
+        width: this.width,
+        height: this.height,
       },
-      format: Renderer.DEPTH_FORMAT,
-      dimension: "2d",
-      usage: GPUTextureUsage.RENDER_ATTACHMENT
-        | GPUTextureUsage.TEXTURE_BINDING
-      ,
-    });
+    } as const satisfies Partial<GPUTextureDescriptor>;
 
-    if (prev instanceof GPUTexture) prev.destroy();
+    const overrides: Omit<GPUTextureDescriptor, keyof typeof sharedDescriptor> = Object();
 
-    this.viewsMap.set(texture, texture.createView())
+    switch (type) {
+      case GBufferType.Frame:
 
-    return texture;
+        overrides.label   = "Frame Buffer"
+        overrides.format  = Renderer.RENDER_FORMAT;
+        overrides.usage   = GPUTextureUsage.RENDER_ATTACHMENT
+          | GPUTextureUsage.TEXTURE_BINDING
+          | GPUTextureUsage.COPY_DST
+        break;
+      case GBufferType.Depth:
 
-  }
+        overrides.label   = "Depth Texture"
+        overrides.format  = Renderer.DEPTH_FORMAT;
+        overrides.usage   = GPUTextureUsage.RENDER_ATTACHMENT
+          | GPUTextureUsage.TEXTURE_BINDING
+        break;
+      case GBufferType.Normal:
 
-  private updateFrameBuffer() {
+        overrides.label   = "Normal Buffer"
+        overrides.format  = Renderer.RENDER_FORMAT;
+        overrides.usage   = GPUTextureUsage.RENDER_ATTACHMENT
+          | GPUTextureUsage.TEXTURE_BINDING
+          | GPUTextureUsage.COPY_DST
+        break;
+    }
 
-    const prev = this.frameBuffer;
+    if ( previous ) previous.destroy();
 
-    const texture = this.device.createTexture({
-      label: "Frame Buffer",
-      format: Renderer.RENDER_FORMAT,
-      sampleCount: this.msaa,
-      size: {
-        width: this.context.canvas.width,
-        height: this.context.canvas.height,
-      },
-      usage: GPUTextureUsage.RENDER_ATTACHMENT
-        | GPUTextureUsage.COPY_DST
-        | GPUTextureUsage.TEXTURE_BINDING
-    });
+    const texture = device.createTexture(Object.assign(sharedDescriptor, overrides))
 
-    if (prev instanceof GPUTexture) prev.destroy();
-
-    this.viewsMap.set(texture, texture.createView());
+    this.viewMap.set(texture, texture.createView())
 
     return texture;
 
@@ -237,35 +220,42 @@ export class Renderer {
 
   public addScene(scene: SceneInterface) {
 
-    this.onResizeHooks.add(() => scene.onScreenChange());
+    this.onResizeHooks.add(() => scene.onScreenResize());
 
-    this.scenes.push(scene);
+    this.scenes.push(this.currentScene = scene);
 
-    this.currentScene.actor.applyListeners(this.context.canvas as HTMLCanvasElement);
+    scene.actor.applyListeners(this.context.canvas as HTMLCanvasElement);
 
+    return this;
+
+  }
+
+  public addPostPass(pass: PostEffect) {
+    this.postPasses.add(pass);
   }
 
   public render(time: DOMHighResTimeStamp = 0) {
 
+    if ( this.currentScene === null ) return;
+
     this.info.timestampPrev = time;
 
-    const campos = this.currentScene.actor.camera.position;
+    const cam = this.currentScene.actor.camera;
 
-		window.device.queue.writeBuffer(
-      this.baseUniformBuffer, 
+		device.queue.writeBuffer(
+      this.uniformBuffer, 
       0, 
       new Float32Array([
         this.info.currentFrame++,
         0, // byte for align
-        this.context.canvas.width,
-        this.context.canvas.height,
-        campos[0],
-        campos[1],
-        campos[2],
+        this.width,
+        this.height,
+        ...cam.position,
+        ...cam.direction,
       ]),
     );
 
-    if (this.framedrop === false) {
+    if (this.drop === false) {
 
       { // Основной проход
 
@@ -273,16 +263,7 @@ export class Renderer {
           label: "main pass encoder"
         });
 
-        // const querySet = Renderer.TIME_MEASURE 
-        //   ? device.createQuerySet({ count: 2, type: "timestamp" }) 
-        //   : undefined
-
         this.currentScene.pass(encoder);
-
-        // if ( Renderer.TIME_MEASURE && querySet ) {
-        //   this.measures.updateQueryBuffers(querySet!);
-        // }
-
         this.device.queue.submit([ encoder.finish() ]);
 
       }
@@ -293,16 +274,6 @@ export class Renderer {
           post.pass(this.context.getCurrentTexture());
         }
         
-      }
-
-      // const l = Array.from(this.currentScene.lightSources.lights);
-
-      { // Отладочные проходы
-        // if ( import.meta.env.DEV ) this.preview.show(
-        //   this.context.getCurrentTexture(),
-        //   // this.depthBuffer
-        //   l[0].texture
-        // );
       }
 
     }

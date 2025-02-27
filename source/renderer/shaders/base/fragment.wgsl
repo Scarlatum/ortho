@@ -1,3 +1,5 @@
+const SHADOW_INTENSITY = 0.10;
+
 @fragment fn fragmentKernel(
   @builtin(front_facing) face: bool,
   in: VertexOut,
@@ -5,22 +7,22 @@
 
   if ( face == false ) { discard; }
 
+  var debug_color = vec3f(1.0);
+
   var light = vec3f(0.0);
-  var color = vec4f(1.0);
+  var color = vec3f(1.0);
 
-  let dist  = distance(in.globalCoords.xyz, params.globalPosition.xyz);
+  let dist  = distance(in.world.xyz, params.globalPosition.xyz);
 
-  let nrml  = dot(in.norm.xyz, light_direction);
+  let nrml  = dot(in.normals.xyz, light_direction);
   let ambt  = vec3f(1.0);
-  let mist  = noise(in.globalCoords.yz / 100 + params.tick / 600) * MIST_DENSITY;
-  let fog   = abs(dist) / FOG_DISTANCE * FOG_DENSITY;
 
-  let shadow_offset = clamp(-0.005 * tan(asin(nrml)), 0.0, 1.0);
-  let shadow_map_uv = 1.0 / SHADOW_MAP_RESOLUTION;
+  let shadow_offset = clamp(-0.001 * tan(asin(nrml)), 0.0, 1.0);
+  let shadow_px2uv = 1.0 / SHADOW_MAP_RESOLUTION;
 
   var visibility = 0.0;
-
-  if ( instanceParams.shadowRecieve == 1u ) {
+  
+  if ( instanceParams.shadowRecieve == 1u ) { // Каскадная карта теней
 
     let lp = array<vec4f, 4>(
       in.directionLigthSpaceDistant,
@@ -29,39 +31,67 @@
       in.directionLigthSpaceClose
     );
 
-    for ( var i: u32 = 0; i < 4; i += 1 ) {
+    for ( var i: u32 = SHADOW_MAP_CASCADE_OFFSET; i < 4; i += 1 ) {
 
-      let space = lp[i];
+      var texel = 0.0;
 
-      let texel = textureSampleCompare(
-        light_depth, shadowSampler, 
-        space.xy, 3 - i, space.z,
-      );
+      let space     = lp[i];
+      let bounders  = ceil(saturate(space.x) % 1.0) * ceil(saturate(space.y) % 1.0);
+
+      switch i {
+        case 3u: {
+
+          for ( var k: u32 = 0; k < 9; k++ ) {
+            texel += textureSampleCompare(light_depth, shadowSampler, space.xy + shadow_px2uv * KERNEL_3x3[k], 3 - i, space.z);
+          }
+
+          texel /= 9.0;
+
+        }
+        case 2u: {
+
+          for ( var k: u32 = 0; k < 5; k++ ) {
+            texel += textureSampleCompare(light_depth, shadowSampler, space.xy + shadow_px2uv * KERNEL_2x2[k] * 0.5, 3 - i, space.z);
+          }
+
+          texel /= 5.0;
+
+        }
+        default: {
+          texel = textureSampleCompare(light_depth, shadowSampler, space.xy, 3 - i, space.z);
+        }
+      }
 
       visibility = mix(
         visibility,
         1.0 - texel,
-        ceil(clamp(0.0, 1.0, space.x) % 1.0) 
-        * 
-        ceil(clamp(0.0, 1.0, space.y) % 1.0)
+        bounders
       );
+
+      if ( CASCADE_PREVIEW ) {
+        debug_color = mix(
+          debug_color,
+          pallete[i],
+          bounders
+        );
+      }
 
     }
 
   }
 
-  // Point lights
+  // Точечные источники света
   for ( var i: u32 = 0; i < arrayLength(&pointLigth); i++ ) {
 
     let p: PointLight = pointLigth[i];
 
     if ( p.visibility != 0.0 ) {
 
-      let n = p.range / distance(in.globalCoords.xyz, p.position);
+      let n = p.range / distance(in.world.xyz, p.position);
 
       light += p.color
         * (n * n)
-        * clamp(dot(in.norm.xyz, p.position - in.globalCoords.xyz), 0.0, 1.0)
+        * (saturate(dot(in.normals.xyz, p.position - in.world.xyz)) + 0.05)
         ;
       
     }
@@ -69,19 +99,29 @@
   }
 
   switch instanceParams.materialID {
-    // #MATERIAL
+
+    @include(material);
+
     default: {
-      color = vec4f(0,0,0,1);
+      color = vec3f(0,0,0);
     }
+
   }
 
-  let shadow    = visibility * 0.15 * smoothstep(0.0, 1.0, nrml);
-  let dark      = nrml * -0.15;
-  let intencity = toGrayscale(ambt) + toGrayscale(light);
+  let shadow    = visibility * SHADOW_INTENSITY * smoothstep(0.0, 1.0, nrml);
+  let dark      = nrml * -SHADOW_INTENSITY;
+  let intencity = toGrayscale(light);
 
-  let r = mix(clamp((color.rgb - dark - shadow + light) * intencity, vec3f(0), vec3f(1)), ambt, fog * 2) + mist;
+  color  = saturate(color - dark - shadow);
+  color += light;
 
-  return vec4f(r, 1.0);
+  if ( CASCADE_PREVIEW ) {
+    color *= debug_color;
+  }
+
+  @include(fragment);
+
+  return vec4f(color, 1.0);
 
 }
  

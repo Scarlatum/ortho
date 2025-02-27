@@ -2,6 +2,7 @@
 /// <reference types="./source/types/orientation.d.ts" />
 /// <reference types="./source/types/assets.d.ts" />
 /// <reference types="./source/types/meta.d.ts" />
+/// <reference types="./source/types/memory.d.ts" />
 
 interface ImportMeta {
   env: {

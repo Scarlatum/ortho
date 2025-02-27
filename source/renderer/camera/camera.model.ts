@@ -1,4 +1,4 @@
-import { mat4, vec2, vec3 } from "gl-matrix";
+import { Ortho } from "ortho"
 
 export const enum Axis { X, Y, Z };
 export const enum CameraView { Front, Up, Right };
@@ -6,34 +6,37 @@ export const enum CameraView { Front, Up, Right };
 
 export class Observer {
 
-  #buffer = new SharedArrayBuffer(Float32Array.BYTES_PER_ELEMENT * 9);
+  #buffer = new SharedArrayBuffer(Float32Array.BYTES_PER_ELEMENT * 12);
 
   static BUFFER_SIZE = 4 * 4 * 2;
   static BUFFER_TYPE = Float32Array;
   static BUFFER_STRIDE = 4 * 4 * Float32Array.BYTES_PER_ELEMENT;
 
-  static UP: vec3 = [ 0, 1, 0 ];
+  static UP: Ortho.vec3 = [ 0, 1, 0 ];
   static FAR_POINT = 1000;
 
   protected needsUpdate: boolean = true;
-  protected matrix = Array<vec3>();
+  protected matrix = Array<Ortho.vec3>();
 
+  public readonly direction = new Float32Array(this.#buffer,Float32Array.BYTES_PER_ELEMENT * 9,3);
   public readonly moveVector = new Float32Array(this.#buffer,Float32Array.BYTES_PER_ELEMENT * 6,3);
   public readonly position = new Float32Array(this.#buffer,Float32Array.BYTES_PER_ELEMENT * 3,3);
   public readonly target = new Float32Array(this.#buffer,0,3);
-  public projection = mat4.create();
+  public projection = Ortho.mat4.create();
   public gbuffer: GPUBuffer;
 
-  constructor(protected child?: Observer) {
+  constructor(protected child?: Observer, protected parent: Nullable<Observer> = null) {
 
-    if ( child ) {
+    // if ( child ) {
 
-      if ( child.child === this ) throw Error("Observers couple has cyclic dependency");
+    //   if ( child.child === this ) throw Error("Observers couple has cyclic dependency");
 
-      this.position = child.position;
-      this.target   = child.target;
+    //   this.position = child.position;
+    //   this.target   = child.target;
 
-    }
+    //   child.parent = this;
+
+    // }
     
     this.gbuffer = device.createBuffer({
       label: `Observer matrixes ${ crypto.randomUUID() }`,
@@ -41,26 +44,28 @@ export class Observer {
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
     });
 
-    this.matrix[ CameraView.Front ] = vec3.create();
-    this.matrix[ CameraView.Up ] = vec3.create();
-    this.matrix[ CameraView.Right ] = vec3.create();
+    this.matrix[ CameraView.Front ] = Ortho.vec3.create();
+    this.matrix[ CameraView.Up ] = Ortho.vec3.create();
+    this.matrix[ CameraView.Right ] = Ortho.vec3.create();
 
-    vec3.scale(this.target, this.target, Observer.FAR_POINT);
+    Ortho.vec3.scale(this.target, this.target, Observer.FAR_POINT);
 
   }
 
   public update() {
 
-    vec3.normalize(this.matrix[ CameraView.Front ], vec3.sub(this.matrix[ CameraView.Front ], this.position, this.target));
+    Ortho.vec3.normalize(this.direction, Ortho.vec3.subtract([0,0,0], this.target, this.position));
+    
+    Ortho.vec3.normalize(this.matrix[ CameraView.Front ], Ortho.vec3.sub(this.matrix[ CameraView.Front ], this.position, this.target));
 
-    vec3.cross(this.matrix[ CameraView.Right ], Camera.UP, this.matrix[ CameraView.Front ]);
+    Ortho.vec3.cross(this.matrix[ CameraView.Right ], Camera.UP, this.matrix[ CameraView.Front ]);
 
-    vec3.normalize(this.matrix[ CameraView.Up ], vec3.cross(this.matrix[ CameraView.Up ], this.matrix[ CameraView.Front ], this.matrix[ CameraView.Right ]));
-    vec3.normalize(this.matrix[ CameraView.Right ], this.matrix[ CameraView.Right ]);
+    Ortho.vec3.normalize(this.matrix[ CameraView.Up ], Ortho.vec3.cross(this.matrix[ CameraView.Up ], this.matrix[ CameraView.Front ], this.matrix[ CameraView.Right ]));
+    Ortho.vec3.normalize(this.matrix[ CameraView.Right ], this.matrix[ CameraView.Right ]);
 
-    const tx = vec3.dot(this.position, this.matrix[ CameraView.Right ]);
-    const ty = vec3.dot(this.position, this.matrix[ CameraView.Up ]);
-    const tz = vec3.dot(this.position, this.matrix[ CameraView.Front ]);
+    const tx = Ortho.vec3.dot(this.position, this.matrix[ CameraView.Right ]);
+    const ty = Ortho.vec3.dot(this.position, this.matrix[ CameraView.Up ]);
+    const tz = Ortho.vec3.dot(this.position, this.matrix[ CameraView.Front ]);
 
     device.queue.writeBuffer(this.gbuffer, 0, new Camera.BUFFER_TYPE(this.projection));
     device.queue.writeBuffer(this.gbuffer, Observer.BUFFER_STRIDE, new Camera.BUFFER_TYPE([
@@ -82,15 +87,17 @@ export class Camera extends Observer {
 
   public fov = Camera.BASE_FOV;
   public sensetivity = .1;
-  public rotation = vec2.create();
+  public rotation = Ortho.vec2.create();
 
   constructor(
     public aspect: number,
   ) {
 
-    super();    
+    super();   
+    
+    this.target.set([0,0,10]);
 
-    mat4.perspective(
+    Ortho.mat4.perspective(
       this.projection,
       this.fov * (Math.PI / 180),
       aspect,
@@ -102,21 +109,21 @@ export class Camera extends Observer {
 
   get realtiveMovement() {
 
-    let transition = [ 0, 0, 0 ] as vec3;
+    let transition = [ 0, 0, 0 ] as Ortho.vec3;
 
-    const norm = vec3.normalize([ 0, 0, 0 ], vec3.sub([ 0, 0, 0 ], this.target, this.position));
-    const cross = vec3.cross([ 0, 0, 0 ], [ 0, 1, 0 ], norm);
+    const norm = Ortho.vec3.normalize([ 0, 0, 0 ], Ortho.vec3.sub([ 0, 0, 0 ], this.target, this.position));
+    const cross = Ortho.vec3.cross([ 0, 0, 0 ], [ 0, 1, 0 ], norm);
 
     const shift = [
       cross[ 0 ] * this.moveVector[ Axis.X ] + norm[ 0 ] * this.moveVector[ Axis.Y ],
       cross[ 1 ] * this.moveVector[ Axis.X ] + norm[ 1 ] * this.moveVector[ Axis.Y ],
       cross[ 2 ] * this.moveVector[ Axis.X ] + norm[ 2 ] * this.moveVector[ Axis.Y ],
-    ] as vec3;
+    ] as Ortho.vec3;
 
     shift[ Axis.Y ] += this.moveVector[ Axis.Z ] * 10;
 
-    vec3.add(this.target, this.target, shift);
-    vec3.add(this.position, this.position, shift);
+    Ortho.vec3.add(this.target, this.target, shift);
+    Ortho.vec3.add(this.position, this.position, shift);
 
     return transition;
 
@@ -136,14 +143,14 @@ export class Camera extends Observer {
 
     const rel = this.realtiveMovement;
 
-    vec3.add(this.position, this.position, rel);
-    vec3.add(this.target, this.target, rel);
+    Ortho.vec3.add(this.position, this.position, rel);
+    Ortho.vec3.add(this.target, this.target, rel);
 
   }
 
-  public movementHandler(movement: vec3) {
+  public movementHandler(movement: Ortho.vec3) {
 
-    vec3.add(this.moveVector, this.moveVector, movement.map(x => x * 0.015) as vec3);
+    Ortho.vec3.add(this.moveVector, this.moveVector, movement.map(x => x * 0.015) as Ortho.vec3);
 
     this.needsUpdate = true;
 
@@ -151,7 +158,7 @@ export class Camera extends Observer {
 
   public rotate(rotation: Array<[ Axis, number ]>) {
 
-    const newPos = [ 0, 0, 1 ] satisfies vec3;
+    const newPos = [ 0, 0, 1 ] satisfies Ortho.vec3;
 
     for (const [ axis, value ] of rotation) {
 
@@ -174,14 +181,14 @@ export class Camera extends Observer {
     const xc = Math.cos(this.rotation[ Axis.X ]);
     const xs = Math.sin(this.rotation[ Axis.X ]);
 
-    vec3.transformMat4(newPos, newPos, [
+    Ortho.vec3.transformMat4(newPos, newPos, [
       xc, 0, xs, 0,
       0, yc, ys * -1, 0,
       xs * -1, ys, yc * xc, 0,
       0, 0, 0, 1,
     ]);
 
-    vec3.set(this.target,
+    Ortho.vec3.set(this.target,
       this.position[ 0 ] + newPos[ 0 ],
       this.position[ 1 ] + newPos[ 1 ],
       this.position[ 2 ] + newPos[ 2 ],
@@ -190,7 +197,7 @@ export class Camera extends Observer {
     // quat.rotateX(this.orientation, this.orientation, rotation[Axis.Y][1] * +1 * this.sensetivity);
     // quat.rotateY(this.orientation, this.orientation, rotation[Axis.X][1] * -1 * this.sensetivity);
 
-    // this.target = vec3.add([0,0,0], this.position, vec3.transformQuat([0,0,0], [
+    // this.target = OrthoTypes.vec3.add([0,0,0], this.position, OrthoTypes.vec3.transformQuat([0,0,0], [
     //   0,
     //   0,
     //   Camera.FAR_POINT,
@@ -201,7 +208,7 @@ export class Camera extends Observer {
   }
 
   public updatePerspective(fov: number = this.fov) {
-    mat4.perspective(
+    Ortho.mat4.perspective(
       this.projection,
       (this.fov = fov) * (Math.PI / 180),
       this.aspect,
@@ -220,16 +227,11 @@ export class Camera extends Observer {
 
   }
 
-  public onFront<T extends vec3>(arr: Array<T>) {
-
-    const pos = this.position
-    const tar = this.target
-
-    return arr.some(x => 0 <= vec3.dot(
-      vec3.normalize([0,0,0], vec3.sub([0,0,0], x, tar)),
-      vec3.normalize([0,0,0], vec3.sub([0,0,0], x, pos)),
+  public onFront<T extends Ortho.vec3>(arr: Array<T>) {
+    return arr.some(x => 0 <= Ortho.vec3.dot(
+      Ortho.vec3.normalize([0,0,0], Ortho.vec3.sub([0,0,0], x, this.position)),
+      this.direction,
     ));
-
   }
 
 }

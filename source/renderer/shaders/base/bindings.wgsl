@@ -1,4 +1,4 @@
-@group(0) @binding(0) var<uniform> params: VertexParams;
+@group(0) @binding(0) var<uniform> params: Params;
 @group(0) @binding(1) var<uniform> view: Observer;
 @group(0) @binding(2) var textureSampler: sampler;
 @group(0) @binding(3) var shadowSampler: sampler_comparison;
@@ -11,6 +11,5 @@
 @group(2) @binding(0) var<storage, read> directionLigth: array<Observer>;
 @group(2) @binding(1) var<uniform> light_direction: vec3f;
 @group(2) @binding(2) var light_depth : texture_depth_2d_array;
-
 
 @group(3) @binding(0) var<storage, read> pointLigth: array<PointLight>;

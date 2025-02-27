@@ -1,7 +1,9 @@
-@id(0) override SHADOW_MAP_RESOLUTION: f32 = 1024.0;
-@id(1) override FOG_DISTANCE: f32          = 400.0;
-@id(2) override FOG_DENSITY: f32           = 0.50;
-@id(3) override MIST_DENSITY: f32          = 0.05;
+@id(0) override SHADOW_MAP_RESOLUTION     : f32 = 1024.0;
+@id(1) override SHADOW_MAP_CASCADE_OFFSET : u32 = 0;
+
+@id(2) override FOG_DISTANCE  : f32 = 400.0;
+@id(3) override FOG_DENSITY   : f32 = 0.500;
+@id(4) override MIST_DENSITY  : f32 = 0.050;
 
 struct VertexOut {
   @builtin(position) pos: vec4f,
@@ -21,8 +23,6 @@ struct Observer {
 
   @location(0) transformationIndex: f32,
   @location(1) vertexData: vec3f,
-  @location(2) normals: vec3f,
-  @location(3) uv: vec2f,
 
 ) -> VertexOut {
 
@@ -44,7 +44,8 @@ struct Observer {
 
   if ( face ) { discard; }
 
-  let r = SHADOW_MAP_RESOLUTION;
+  let a = SHADOW_MAP_RESOLUTION;
+  let b = SHADOW_MAP_CASCADE_OFFSET;
 
   return vec4f(1);
 

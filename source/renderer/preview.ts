@@ -1,3 +1,4 @@
+import { SceneInterface } from "../interfaces/scene.interface";
 import { DirectionLight } from "./light/light.model";
 
 import shader from "./shaders/post/preview.wgsl?raw";
@@ -9,7 +10,7 @@ export class TexturePreview {
   protected uniformBuffer: GPUBuffer = Object();
   protected vertexBuffer: GPUBuffer;
 
-  constructor() {
+  constructor(private scene: SceneInterface) {
 
     this.shaderModule = device.createShaderModule({
       code: shader,
@@ -53,7 +54,7 @@ export class TexturePreview {
         0
       );
 
-      model.scaleSelf(scale, scale * (context.canvas.width / context.canvas.height));
+      model.scaleSelf(scale, scale * (this.scene.renderer.width / this.scene.renderer.height));
   
       new Float32Array(this.uniformBuffer.getMappedRange()).set(model.toFloat32Array());
   
