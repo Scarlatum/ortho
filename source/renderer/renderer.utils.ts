@@ -138,44 +138,7 @@ export namespace functions {
     return Promise.all(queue);
   
   }
-  
-  export async function generateAtlasTexture(device: GPUDevice, textures: Array<GPUTexture>) {
-  
-    const encoder = device.createCommandEncoder();
-  
-    const atlasTexture = device.createTexture({
-      format: "rgba8unorm",
-      usage: GPUTextureUsage.TEXTURE_BINDING
-        | GPUTextureUsage.COPY_DST
-        | GPUTextureUsage.RENDER_ATTACHMENT,
-      size: {
-        width: 64,
-        height: 32,
-      },
-    });
-  
-    textures.forEach((x, i) => {
-      encoder.copyTextureToTexture({
-        texture: x
-      }, {
-        texture: atlasTexture,
-        origin: {
-          x: i * 32,
-        }
-      }, {
-        width: x.width,
-        height: x.height,
-      });
-    });
-  
-    device.queue.submit([ encoder.finish(), ]);
-  
-    textures.forEach(x => x.destroy());
-  
-    return atlasTexture;
-  
-  }
-  
+    
   export function createBaseFragmentTarget(): GPUColorTargetState {
     return {
       format: Renderer.RENDER_FORMAT,
@@ -201,13 +164,11 @@ export namespace functions {
   ): GPURenderPipeline {
   
     const vertex: GPUVertexState = {
-      entryPoint: "vertexKernel",
       module: shaders.vertex,
       buffers: [ Mesh.getVertexLayout(simplified) ],
     };
   
     const fragment: GPUFragmentState = {
-      entryPoint: "fragmentKernel",
       module: shaders.fragment,
       targets: [ createBaseFragmentTarget() ],
       constants: {
