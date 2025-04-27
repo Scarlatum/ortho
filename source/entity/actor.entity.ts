@@ -7,7 +7,7 @@ type Buttons = Record<KeyboardEvent[ 'code' ], boolean>;
 
 export class Actor {
 
-  public maxSpeed = 3;
+  public maxSpeed = parseInt(localStorage.getItem("ortho::actor::maxSpeed") || "1");
   public acceleration = 0;
   public motionState = false;
   public camera: Camera;
@@ -48,15 +48,13 @@ export class Actor {
 
   public mouseWheelHandler(e: WheelEvent) {
 
-    if (e.shiftKey) {
-      this.camera.movementHandler([
-        0.00,
-        0.00,
-        Math.sign(e.deltaY) * -0.15,
-      ]);
-    } else {
-      this.camera.updatePerspective(this.camera.fov + Math.sign(e.deltaY));
-    }
+    if (e.shiftKey) this.camera.movementHandler([
+      0.00,
+      0.00,
+      Math.sign(e.deltaY) * -0.15,
+    ]);
+    
+    else this.camera.fov += Math.sign(e.deltaY);
 
   }
 
