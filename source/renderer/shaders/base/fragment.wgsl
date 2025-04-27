@@ -1,11 +1,11 @@
-const SHADOW_INTENSITY = 0.10;
+const SHADOW_INTENSITY = 0.05;
 
 @fragment fn fragmentKernel(
   @builtin(front_facing) face: bool,
   in: VertexOut,
-) -> @location(0) vec4f {
+) -> FragmentOut {
 
-  if ( face == false ) { discard; }
+  var result: FragmentOut;
 
   var debug_color = vec3f(1.0);
 
@@ -21,7 +21,7 @@ const SHADOW_INTENSITY = 0.10;
   let shadow_px2uv = 1.0 / SHADOW_MAP_RESOLUTION;
 
   var visibility = 0.0;
-  
+
   if ( instanceParams.shadowRecieve == 1u ) { // Каскадная карта теней
 
     let lp = array<vec4f, 4>(
@@ -42,23 +42,18 @@ const SHADOW_INTENSITY = 0.10;
         case 3u: {
 
           for ( var k: u32 = 0; k < 9; k++ ) {
-            texel += textureSampleCompare(light_depth, shadowSampler, space.xy + shadow_px2uv * KERNEL_3x3[k], 3 - i, space.z);
+            let n = textureGatherCompare(light_depth, shadowSampler, space.xy + shadow_px2uv * KERNEL_3x3[k], 3 - i, space.z);
+            texel += n.x + n.y + n.z + n.y;
           }
 
-          texel /= 9.0;
-
-        }
-        case 2u: {
-
-          for ( var k: u32 = 0; k < 5; k++ ) {
-            texel += textureSampleCompare(light_depth, shadowSampler, space.xy + shadow_px2uv * KERNEL_2x2[k] * 0.5, 3 - i, space.z);
-          }
-
-          texel /= 5.0;
+          texel /= 36.0;
 
         }
         default: {
-          texel = textureSampleCompare(light_depth, shadowSampler, space.xy, 3 - i, space.z);
+
+          let n = textureGatherCompare(light_depth, shadowSampler, space.xy, 3 - i, space.z);
+          texel = (n.x + n.y + n.z + n.y) / 4.0;
+
         }
       }
 
@@ -68,13 +63,13 @@ const SHADOW_INTENSITY = 0.10;
         bounders
       );
 
-      if ( CASCADE_PREVIEW ) {
-        debug_color = mix(
-          debug_color,
-          pallete[i],
-          bounders
-        );
-      }
+      // if ( params.debugCascade == 1.0 ) {
+      //   debug_color = mix(
+      //     debug_color,
+      //     pallete[i],
+      //     bounders
+      //   );
+      // }
 
     }
 
@@ -108,20 +103,23 @@ const SHADOW_INTENSITY = 0.10;
 
   }
 
-  let shadow    = visibility * SHADOW_INTENSITY * smoothstep(0.0, 1.0, nrml);
-  let dark      = nrml * -SHADOW_INTENSITY;
+  let shadow    = visibility * SHADOW_INTENSITY * saturate(nrml);
+  let dark      = saturate(nrml * -SHADOW_INTENSITY);
   let intencity = toGrayscale(light);
 
-  color  = saturate(color - dark - shadow);
+  color  = saturate(color - shadow - dark);
   color += light;
 
-  if ( CASCADE_PREVIEW ) {
+  if ( params.debugCascade == 1.0 ) {
     color *= debug_color;
   }
 
   @include(fragment);
 
-  return vec4f(color, 1.0);
+  result.render = vec4f(color, 1.0);
+  result.normals = vec4f(abs(in.normals.xyz), 1.0);
+
+  return result;
 
 }
  

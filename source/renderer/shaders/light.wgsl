@@ -42,11 +42,6 @@ struct Observer {
   in: VertexOut,
 ) -> @location(0) vec4f {
 
-  if ( face ) { discard; }
-
-  let a = SHADOW_MAP_RESOLUTION;
-  let b = SHADOW_MAP_CASCADE_OFFSET;
-
-  return vec4f(1);
+  return vec4f(vec3f(in.pos.z), 1);
 
 }

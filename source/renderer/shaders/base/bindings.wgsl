@@ -10,6 +10,6 @@
 
 @group(2) @binding(0) var<storage, read> directionLigth: array<Observer>;
 @group(2) @binding(1) var<uniform> light_direction: vec3f;
-@group(2) @binding(2) var light_depth : texture_depth_2d_array;
+@group(2) @binding(2) var light_depth: texture_depth_2d_array;
 
 @group(3) @binding(0) var<storage, read> pointLigth: array<PointLight>;
