@@ -34,7 +34,12 @@ export class ShadowPass {
     this.pipeline = utils.createBasePipeline({
       fragment: module,
       vertex: module,
-    }, undefined, true);
+    }, {
+      primitive: {
+        topology: "triangle-list",
+        cullMode: "front",
+      }
+    }, true, false, Object());
 
     this.temporalTexture = device.createTexture({
       label: "TEMP TEXTURE",
@@ -65,7 +70,7 @@ export class ShadowPass {
 
     this.colorAttachment = { 
       loadOp: "clear", 
-      storeOp: "discard", 
+      storeOp: "store", 
       clearValue: [ 1, 1, 1, 1 ], 
       view: this.temporalTexture.createView()
     };
@@ -86,6 +91,7 @@ export class ShadowPass {
     for ( let i = 0; i < DirectionLight.LEVELS; i++ ) {
 
       const encoder = device.createRenderBundleEncoder({
+        label: "SHADOW PASS ENCODER",
         colorFormats: [ Renderer.RENDER_FORMAT ],
         depthStencilFormat: Renderer.DEPTH_FORMAT,
         sampleCount: 1,
@@ -116,14 +122,16 @@ export class ShadowPass {
 
   }
 
+  // TODO: I should implement one-pass cascade shadow map, bc it takes a lot of a time just to begin render pass by alone. 
+  // TODO: It should help a lot with render time, and, maybe, reduce a Barrier calls that also not cheap...
   public pass(
     encoder: GPUCommandEncoder,
-    drawQueue: Set<Drawable>,
+    drawQueue: Iterable<Drawable>,
   ) {
 
     const sun = this.scene.sun;
 
-    vec3.negate(this.lightDir, sun.observer.direction);
+    vec3.negate(this.lightDir, sun.head.direction);
 
     device.queue.writeBuffer(
       this.lightDirectionBuffer, 0, 

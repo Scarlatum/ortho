@@ -7,7 +7,9 @@ import { Downsampler } from "./attachable/downsampler.pass";
 export class BlurPass extends PostEffect {
 
   private downsampler: Downsampler;
-  private uniform: GPUBuffer;
+  
+  // Brand identifier for this post effect
+  readonly brand = Symbol("blur");
 
   constructor(
     private renderer: Renderer,
@@ -16,30 +18,28 @@ export class BlurPass extends PostEffect {
 
     super();
 
-    this.shaderModule = device.createShaderModule({
+    this.downsampler = new Downsampler(renderer);
+
+    this.module = device.createShaderModule({
       code: shader
     });
 
     this.pipeline = device.createRenderPipeline({
       layout: "auto",
       vertex: {
-        entryPoint: "vertexKernel",
-        module: this.shaderModule,
+        module: this.module,
       },
       fragment: {
-        entryPoint: "fragmentKernel",
-        module: this.shaderModule,
+        module: this.module,
         targets: [ { format: Renderer.RENDER_FORMAT } ],
       },
     });
-
-    this.downsampler = new Downsampler(renderer);
 
     this.sampler = device.createSampler({
       magFilter: "linear"
     });
 
-    this.uniform = device.createBuffer({
+    this.uniformBuffer = device.createBuffer({
       size: Float32Array.BYTES_PER_ELEMENT * 4,
       usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.UNIFORM,
     });
@@ -50,7 +50,7 @@ export class BlurPass extends PostEffect {
 
     const intencity = Math.sin(this.renderer.info.currentFrame / 60) * 0.5 + 0.5;
 
-    device.queue.writeBuffer(this.uniform, 0, new Float32Array([
+    device.queue.writeBuffer(this.uniformBuffer, 0, new Float32Array([
       this.renderer.width,
       this.renderer.height,
       intencity,
@@ -80,7 +80,7 @@ export class BlurPass extends PostEffect {
         entries: [
           { binding: 0, resource: views.downsampled },
           { binding: 1, resource: this.sampler },
-          { binding: 2, resource: { buffer: this.uniform }}
+          { binding: 2, resource: { buffer: this.uniformBuffer }}
         ]
       }));
   
