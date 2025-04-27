@@ -1,13 +1,12 @@
-import utils from "../renderer/renderer.utils";
-
 import { ProceduredMaterial } from "../mesh/mesh.material";
 import { InstancedMesh, Mesh, MeshPayload } from "../mesh/mesh.model";
 import { Wave } from "../mesh/parsers/waveform";
 import { ShadowParams } from "../renderer/light/light.model";
 import { Drawable } from "../interfaces/drawable.interface";
 import { Texture } from "../renderer/texture.model";
+import { Renderer } from "../renderer/renderer.model";
 
-interface CreationRequirements {
+interface Requirements {
   geometry: ReturnType<typeof Wave.parseTextFile>,
   texture: GPUTexture,
   material: Nullable<ProceduredMaterial>,
@@ -26,7 +25,7 @@ interface Assets {
 
 type InstancedQuality<T extends number> = T extends 1 ? Mesh : InstancedMesh
 
-type CreationParams<S = {}, I extends number = 1> = {
+type Params<S = object, I extends number = 1> = {
   state         : S,
   instaces      : I,
   shadow        : Partial<ShadowParams>,
@@ -38,13 +37,13 @@ export class Creation<State, const Instances extends number = 1> {
     state         : Object(),
     instaces      : 1,
     shadow        : Drawable.defaultShadowParams,
-  } satisfies CreationParams;
+  } satisfies Params;
 
   public mesh: InstancedQuality<Instances>;
 
   constructor(
     id: symbol,
-    { geometry, material, texture }: CreationRequirements, 
+    { geometry, material, texture }: Requirements, 
     shadow: Partial<ShadowParams>,
     private instances: Instances,
     public state: State = Object()
@@ -66,13 +65,33 @@ export class Creation<State, const Instances extends number = 1> {
       ;
     
   }
-  
+
+  /**
+   * Creates a texture container with the specified number of mipmaps for each texture type
+   * @returns {TextureContainer} An object containing arrays of textures for each type
+   */
+  static createTextureContainer(): TextureContainer {
+    return {
+      diffuse: Array(Texture.mipsQuantity),
+      normals: Array(Texture.mipsQuantity),
+      occlusion: Array(Texture.mipsQuantity),
+    }
+  }
+
+  /**
+   * Creates a new Creation instance with the specified parameters
+   * @param {symbol} id - The unique identifier for the creation
+   * @param {Assets} assets - The assets required for the creation
+   * @param {Nullable<ProceduredMaterial>} customMaterial - The custom material to use for the creation
+   * @param {Partial<Params<S,I>>} params - The parameters for the creation
+   * @returns {Promise<Creation<S,I>>} A new Creation instance
+   */
   static async create<const I extends number, S>(
     id              : symbol,
     assets          : Assets,
     customMaterial  : Nullable<ProceduredMaterial>,
-    params          ?: Partial<CreationParams<S,I>>,
-  ) {
+    params          ?: Partial<Params<S,I>>,
+  ): Promise<Creation<S, I>> {
 
     const { instaces, shadow, state } = params 
       ? Object.assign(structuredClone(Creation.defaultParams), params)
@@ -88,7 +107,7 @@ export class Creation<State, const Instances extends number = 1> {
 
     } 
     
-    else texture = utils.createBaseTexture(device);
+    else texture = Renderer.defaultTexture;
 
     let geometry: Assets['geometry'] = typeof assets.geometry === "string" 
       ? Wave.parseTextFile(assets.geometry) 

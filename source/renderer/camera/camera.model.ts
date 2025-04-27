@@ -25,18 +25,7 @@ export class Observer {
   public projection = Ortho.mat4.create();
   public gbuffer: GPUBuffer;
 
-  constructor(protected child?: Observer, protected parent: Nullable<Observer> = null) {
-
-    // if ( child ) {
-
-    //   if ( child.child === this ) throw Error("Observers couple has cyclic dependency");
-
-    //   this.position = child.position;
-    //   this.target   = child.target;
-
-    //   child.parent = this;
-
-    // }
+  constructor(protected child?: Observer) {
     
     this.gbuffer = device.createBuffer({
       label: `Observer matrixes ${ crypto.randomUUID() }`,
@@ -44,9 +33,9 @@ export class Observer {
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
     });
 
-    this.matrix[ CameraView.Front ] = Ortho.vec3.create();
-    this.matrix[ CameraView.Up ] = Ortho.vec3.create();
-    this.matrix[ CameraView.Right ] = Ortho.vec3.create();
+    this.matrix[ CameraView.Front ] = [0,0,0];
+    this.matrix[ CameraView.Up    ] = [0,0,0];
+    this.matrix[ CameraView.Right ] = [0,0,0];
 
     Ortho.vec3.scale(this.target, this.target, Observer.FAR_POINT);
 
@@ -85,15 +74,17 @@ export class Camera extends Observer {
 
   static BASE_FOV = 75;
 
-  public fov = Camera.BASE_FOV;
+  #fov = Camera.BASE_FOV;
+  #aspect = 16 / 9;
+
   public sensetivity = .1;
   public rotation = Ortho.vec2.create();
 
-  constructor(
-    public aspect: number,
-  ) {
+  constructor(aspect: number) {
 
     super();   
+
+    this.#aspect = aspect;
     
     this.target.set([0,0,10]);
 
@@ -129,6 +120,29 @@ export class Camera extends Observer {
 
   }
 
+  get fov() { return this.#fov }
+  get aspect() { return this.#aspect }
+
+  set fov(value: number) {
+    Ortho.mat4.perspective(
+      this.projection,
+      (this.#fov = value) * (Math.PI / 180),
+      this.aspect,
+      0.1,
+      Camera.FAR_POINT,
+    );
+  }
+
+  set aspect(value: number) {
+    Ortho.mat4.perspective(
+      this.projection,
+      this.fov * (Math.PI / 180),
+      this.#aspect = value,
+      0.1,
+      Camera.FAR_POINT,
+    );
+  }
+
   private move(speedFactor = 50) {
 
     for (let i = 0; i < this.moveVector.length; i++) {
@@ -162,7 +176,7 @@ export class Camera extends Observer {
 
     for (const [ axis, value ] of rotation) {
 
-      this.rotation[ axis ] += value * this.sensetivity;
+      this.rotation[ axis ] += value * (this.sensetivity * (this.fov / 75.0));
 
       switch (axis) {
         case Axis.X:
@@ -207,19 +221,9 @@ export class Camera extends Observer {
 
   }
 
-  public updatePerspective(fov: number = this.fov) {
-    Ortho.mat4.perspective(
-      this.projection,
-      (this.fov = fov) * (Math.PI / 180),
-      this.aspect,
-      0.1,
-      Camera.FAR_POINT,
-    );
-  }
-
   public override update() {
 
-    if (!this.needsUpdate) return;
+    if (this.needsUpdate === false) return;
 
     this.move();
 
