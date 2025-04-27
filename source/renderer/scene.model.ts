@@ -1,6 +1,5 @@
 import utils from "./renderer.utils";
 import { Renderer } from "./renderer.model";
-import { layouts, MSAA, GBufferType } from "./renderer.contants";
 
 import { Actor } from "../entity/actor.entity";
 
@@ -25,6 +24,7 @@ export class Scene extends SceneInterface {
   static LIGHT_PASS = true;
 
   private static readonly textureSamplerDescriptor: GPUSamplerDescriptor = {
+    // maxAnisotropy: 16,
     magFilter: "nearest",
     minFilter: "linear",
     mipmapFilter: "linear"
@@ -32,24 +32,24 @@ export class Scene extends SceneInterface {
 
   private static readonly depthSamplerDescriptor: GPUSamplerDescriptor = {
     compare: "less",
-    minFilter: "nearest",
-    magFilter: "nearest"
+    maxAnisotropy: 16,
+    minFilter: "linear",
+    magFilter: "linear",
+    mipmapFilter: "linear",
   };
 
   public pipeline: GPURenderPipeline;
 
   private passDescriptor = Scene.baseColorAttacment();
   private bindgroupMap = new WeakMap<Drawable, GPUBindGroup>();
-  private bundles = new WeakMap<Drawable, GPURenderBundle>();
   private shadowPass: ShadowPass;
   private setupBindgroup: GPUBindGroup;
 
-  public actor: Actor;
-  public sun = new DirectionLight();
-  public drawQueue = new Set<Drawable>();
-  public onpass = new Set<Function>();
-  public meshes = new Map<any, Mesh | InstancedMesh>();
-  public pointLightSource: PointLightRepository;
+  public override actor: Actor;
+  public override sun: DirectionLight;
+  public override onpass = new Set<Function>();
+  public override meshes = new Map<any, Mesh | InstancedMesh>();
+  public override pointLightSource: PointLightRepository;
 
   constructor(
     public renderer: Renderer,
@@ -70,15 +70,22 @@ export class Scene extends SceneInterface {
       this.renderer.preprocessor,
     ), {
       label: "Scene Pipiline Test",
+      primitive: {
+        cullMode: "back",
+      },
       multisample: { count: this.renderer.msaa },
-      layout: device.createPipelineLayout({
-        bindGroupLayouts: layouts.map(x => device.createBindGroupLayout(x))
-      })
+      layout: this.renderer.bindgroupLayout
     });
 
-    this.shadowPass         = new ShadowPass(this);
-    this.pointLightSource   = new PointLightRepository(this);
-    this.actor              = new Actor(this);
+    this.updateQueue.add(this.sun = new DirectionLight(this));
+    this.updateQueue.add(this.actor = new Actor(this));
+
+    this.shadowPass = new ShadowPass(this);
+    this.pointLightSource = new PointLightRepository(this);
+
+    if ( Scene.LIGHT_PASS ) {
+      this.updateQueue.add(this.pointLightSource);
+    }
 
     this.setupBindgroup = device.createBindGroup({
       label: "Scene Setup Bindgroup",
@@ -91,10 +98,12 @@ export class Scene extends SceneInterface {
       ]
     });
 
-    this.renderer.onResizeHooks.add(() => this.onScreenResize());
-
   }
 
+  /**
+   * Creates a base color attachment configuration for render passes
+   * @returns {GPURenderPassDescriptor} A configured render pass descriptor with color and depth attachments
+   */
   static baseColorAttacment(): GPURenderPassDescriptor {
     return {
       label: "render",
@@ -110,27 +119,59 @@ export class Scene extends SceneInterface {
           loadOp: "clear",
           storeOp: "store",
           clearValue: [ 1, 1, 1, 1 ],
+        },
+        {
+          view: Object(),
+          loadOp: "clear",
+          storeOp: "store",
+          clearValue: [ 0,0,0,0 ]
         }
       ]
     };
   }
 
-  static async setTexture(res: ArrayBuffer, container: TextureContainer, as: keyof TextureContainer) {
+  /**
+   * Sets up a texture from buffer data
+   * @param {ArrayBuffer} res - The raw texture data
+   * @param {TextureContainer} container - The container to store the texture in
+   * @param {keyof TextureContainer} as - The key to store the texture under in the container
+   * @param {number} [mip=0] - The mipmap level to set
+   * @param {boolean} [raw=false] - Whether the input data is raw texture data
+   * @throws {Error} If texture creation fails
+   */
+  static async setTexture(
+    res: ArrayBuffer, 
+    container: TextureContainer, 
+    as: keyof TextureContainer,
+    mip: number = 0,
+    raw: boolean = false,
+  ) {
 
-    const tex = await Texture.fromBuffer(res);
+    const textures = Array(Texture.mipsQuantity);
 
-    if (tex instanceof Texture) {
-      container[as] = [ tex ];
-    }
+    const tex = raw
+      ? Texture.fromRaw(res)
+      : await Texture.fromBuffer(res)
+      ;
+
+    if (tex instanceof Error) throw tex;
+
+    textures[mip] = tex
+
+    container[as] = textures;
 
   }
 
-  private createBundle(x: Drawable) {
-
-    let bundle: GPURenderBundle;
+  /**
+   * Creates a render bundle for a drawable object
+   * @param {Drawable} x - The drawable object to create a bundle for
+   * @returns {GPURenderBundle} The created render bundle
+   */
+  private createBundle(x: Drawable): GPURenderBundle {
 
     const encoder = device.createRenderBundleEncoder({
-      colorFormats: [ Renderer.RENDER_FORMAT ],
+      label: "SCENE BUNDLE",
+      colorFormats: [ Renderer.RENDER_FORMAT, Renderer.NORMAL_FORMAT ],
       depthStencilFormat: Renderer.DEPTH_FORMAT,
       sampleCount: this.renderer.msaa,
     });
@@ -145,9 +186,7 @@ export class Scene extends SceneInterface {
 
       let bindgroup = this.bindgroupMap.get(x);
 
-      if (bindgroup) encoder.setBindGroup(1, bindgroup);
-  
-      else this.bindgroupMap.set(x, bindgroup = device.createBindGroup({
+      if ( !bindgroup ) this.bindgroupMap.set(x, bindgroup = device.createBindGroup({
         label: "Drawable Instance Bindgroup",
         layout: this.pipeline.getBindGroupLayout(1),
         entries: [
@@ -169,92 +208,52 @@ export class Scene extends SceneInterface {
       ? encoder.draw(x.vertexCount, x.updateVisibilityBuffer())
       : encoder.draw(x.vertexCount);
 
-    this.bundles.set(x, bundle = encoder.finish());
-
-    return bundle;
+    return encoder.finish();
 
   }
 
-  private updatePassDescriptor(query?: GPUQuerySet) {
-
-    const framebuffer = this.renderer.gbuffers[ GBufferType.Frame ];
-    const depthbuffer = this.renderer.gbuffers[ GBufferType.Depth ];
-
-    this.passDescriptor.depthStencilAttachment!.view = this.renderer.viewMap.get(depthbuffer)!;
-
-    if (query) {
-      this.passDescriptor.timestampWrites = {
-        querySet: query,
-        beginningOfPassWriteIndex: 0,
-        endOfPassWriteIndex: 1,
-      };
-    }
-
-    for (const x of this.passDescriptor.colorAttachments) {
-
-      if (!x) continue;
-
-      const view = context.getCurrentTexture().createView();
-
-      if (this.renderer.msaa !== MSAA.NONE) {
-        x.view = this.renderer.viewMap.get(framebuffer)!;
-        x.resolveTarget = view;
-      }
-
-      else x.view = view;
-
-    }
-
-    return this.passDescriptor;
-
-  }
-
+  /**
+   * Abstract method to be implemented by derived scenes for scene-specific setup
+   * @returns {Promise<Scene>} The configured scene instance
+   * @throws {Error} Always throws as this is an abstract method
+   */
   public async setupScene(): Promise<Scene> {
     throw Error("Setup is not implemented in your scene");
   }
 
-  public onScreenResize(): void {
+  /**
+   * Adds a drawable object to the scene
+   * @param {Drawable} x - The drawable object to add
+   */
+  public add(x: Drawable) {
 
-    this.actor.camera.aspect = this.renderer.width / this.renderer.height;
-    this.actor.camera.updatePerspective(this.actor.camera.fov);
+    this.bundles.add(this.createBundle(x));
+    this.drawQueue.add(x);
 
   }
 
-  public pass(encoder: GPUCommandEncoder, qs?: GPUQuerySet): void {
+  /**
+   * Executes the main render pass for the scene
+   * @param {GPUCommandEncoder} encoder - The command encoder to record rendering commands
+   */
+  public pass(encoder: GPUCommandEncoder) {
 
-    this.actor.update();
+    for ( const x of this.updateQueue ) x.update();
 
-    for (const cb of this.onpass) cb();
+    for ( const x of this.onpass ) x();
 
-    { // TODO: Предварительный проход для карты глубины и нормалей
-
-    }
-
-    if (Scene.SHADOW_PASS) {
-      this.shadowPass.pass(encoder, this.drawQueue);
-    }
-
-    if (Scene.LIGHT_PASS) { // Point lights
-      this.pointLightSource.update();
-    }
-
+    if ( Scene.SHADOW_PASS ) this.shadowPass.pass(encoder, this.drawQueue);
+    
     { // Render pass
 
-      const desc = this.updatePassDescriptor(qs);
+      const desc = this.renderer.updatePassDescriptor(this.passDescriptor);
       const pass = encoder.beginRenderPass(desc);
 
-      const queue = new Set<GPURenderBundle>();
-
-      for (const x of this.drawQueue) {
-        if (x.drop === false) queue.add(this.bundles.get(x) || this.createBundle(x));
-      }
-
-      pass.executeBundles(queue);
+      pass.executeBundles(this.bundles);
       pass.end();
 
     }
 
   }
-
 
 }
