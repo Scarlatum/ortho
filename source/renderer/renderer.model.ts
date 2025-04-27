@@ -5,7 +5,7 @@ import { MaterialRepository } from "./renderer.material";
 import { Preprocessor } from "../utils/preprocessor.utils";
 import { DefaultShader } from "./renderer.utils"
 
-import { MSAA, GBufferType } from "./renderer.contants";
+import { MSAA, GBufferType, layouts } from "./renderer.contants";
 import { Mesh, VertexLayoutSize } from "../mesh/mesh.model";
 
 export class VertexArena {
@@ -43,12 +43,14 @@ export class VertexArena {
 export class Renderer {
 
   static dec = new TextDecoder();
+  static defaultTexture: GPUTexture;
 
   static readonly DEPTH_FORMAT: GPUTextureFormat = "depth24plus";
   static readonly RENDER_FORMAT: GPUTextureFormat = navigator.gpu.getPreferredCanvasFormat();
-  static readonly TIME_MEASURE = import.meta.env.DEV;
+  static readonly NORMAL_FORMAT: GPUTextureFormat = "rgba8unorm";
 
   public materials = new MaterialRepository();
+  private postEffectMap = new Map<symbol, PostEffect>();
 
   public info = {
     currentFrame  : 0,
@@ -59,11 +61,14 @@ export class Renderer {
 
   protected scenes = Array<SceneInterface>();
   protected postPasses = new Set<PostEffect>();
+  protected onResizeHooks: Set<(...args: any) => any> = new Set([
+    () => this.onScreenResize()
+  ]);
 
+  public bindgroupLayout: GPUPipelineLayout;
   public preprocessor = new Preprocessor(DefaultShader);
   public gbuffers = Array<GPUTexture>(3);
   public msaa = MSAA.X4;
-  public onResizeHooks: Set<(...args: any) => any> = new Set();
   public drop = false;
   public currentScene: Nullable<SceneInterface> = null;
   public uniformBuffer: GPUBuffer;
@@ -80,15 +85,46 @@ export class Renderer {
       format: Renderer.RENDER_FORMAT,
       alphaMode: "premultiplied",
       usage: GPUTextureUsage.RENDER_ATTACHMENT 
-        | GPUTextureUsage.COPY_DST
         | GPUTextureUsage.COPY_SRC
         | GPUTextureUsage.TEXTURE_BINDING
     });
+
+    Renderer.defaultTexture = device.createTexture({
+      format: "rgba8unorm",
+      usage: GPUTextureUsage.TEXTURE_BINDING
+        | GPUTextureUsage.COPY_DST
+        | GPUTextureUsage.RENDER_ATTACHMENT,
+      size: { width: 16, height: 16, depthOrArrayLayers: 1 },
+      dimension: "2d",
+    });
+
+    device.queue.writeTexture(
+      {
+        texture: Renderer.defaultTexture
+      },
+      new Float32Array(16 * 16),
+      {
+        bytesPerRow: 16 * Float32Array.BYTES_PER_ELEMENT,
+        rowsPerImage: 16,
+      },
+      {
+        width: Renderer.defaultTexture.width,
+        height: Renderer.defaultTexture.height,
+      },
+    );
 
     this.uniformBuffer = device.createBuffer({
       size: Float32Array.BYTES_PER_ELEMENT * 32,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
+
+    { // Setup Shared Pipeline Layout
+
+      this.bindgroupLayout = device.createPipelineLayout({
+        bindGroupLayouts: layouts.map(x => device.createBindGroupLayout(x))
+      })
+
+    }
 
     { // Setup static mesh properties
 
@@ -106,8 +142,6 @@ export class Renderer {
 
     }
 
-    this.onResizeHooks.add(() => this.onScreenResize());
-
     this.updateBuffers();
 
     window.addEventListener("resize", () => {
@@ -116,15 +150,29 @@ export class Renderer {
 
   }
 
-  get width() {
+  /**
+   * Gets the width of the canvas
+   * @returns {number} The width of the canvas in pixels
+   */
+  get width(): number {
     return this.context.canvas.width;
   }
 
-  get height() {
+  /**
+   * Gets the height of the canvas
+   * @returns {number} The height of the canvas in pixels
+   */
+  get height(): number {
     return this.context.canvas.height; 
   }
 
-  static async getSetup(view: HTMLCanvasElement) {
+  /**
+   * Initializes WebGPU setup for a given canvas element
+   * @param {HTMLCanvasElement} view - The canvas element to initialize WebGPU for
+   * @returns {Promise<[GPUDevice, GPUAdapter, GPUCanvasContext]>} A tuple containing the GPU device, adapter, and canvas context
+   * @throws {Error} If WebGPU initialization fails
+   */
+  static async getSetup(view: HTMLCanvasElement): Promise<[ GPUDevice, GPUAdapter, GPUCanvasContext ]> {
 
     const adapter = await navigator.gpu.requestAdapter();
 
@@ -150,12 +198,47 @@ export class Renderer {
 
   }
 
+  /**
+   * Updates the render pass descriptor with current texture views
+   * @param {GPURenderPassDescriptor} descriptor - The render pass descriptor to update
+   * @returns {GPURenderPassDescriptor} The updated render pass descriptor
+   * @throws {Error} If color attachments are missing
+   */
+  public updatePassDescriptor(descriptor: GPURenderPassDescriptor): GPURenderPassDescriptor {
+
+    descriptor.depthStencilAttachment!.view = this.viewMap.get(this.gbuffers[ GBufferType.Depth ])!;
+
+    const [ surface, normals ] = descriptor.colorAttachments;
+
+    if ( !surface || !normals ) throw Error();
+
+    const currentTextureView = context.getCurrentTexture().createView();
+
+    normals.view = this.viewMap.get(this.gbuffers[ GBufferType.Normal ])!;
+
+    if (this.msaa !== MSAA.NONE) {
+      surface.view = this.viewMap.get(this.gbuffers[ GBufferType.Frame ])!;
+      surface.resolveTarget = currentTextureView;
+    }
+
+    else surface.view = currentTextureView;
+
+    return descriptor;
+
+  }
+
+  /**
+   * Updates all G-buffer textures based on current canvas dimensions
+   */
   private updateBuffers() {
     for (let type = GBufferType.Frame; type <= GBufferType.Normal; type++) {
       this.gbuffers[ type ] = this.updateTexture(type);
     }
   }
 
+  /**
+   * Handles canvas resize events and updates internal buffers
+   */
   private onScreenResize() {
 
     const { height, width } = getComputedStyle(this.context.canvas as HTMLCanvasElement);
@@ -167,7 +250,12 @@ export class Renderer {
 
   }
 
-  private updateTexture(type: GBufferType) {
+  /**
+   * Updates a specific G-buffer texture
+   * @param {GBufferType} type - The type of G-buffer to update
+   * @returns {GPUTexture} The newly created texture
+   */
+  private updateTexture(type: GBufferType): GPUTexture {
 
     const previous = this.gbuffers[type];
 
@@ -201,7 +289,7 @@ export class Renderer {
       case GBufferType.Normal:
 
         overrides.label   = "Normal Buffer"
-        overrides.format  = Renderer.RENDER_FORMAT;
+        overrides.format  = Renderer.NORMAL_FORMAT;
         overrides.usage   = GPUTextureUsage.RENDER_ATTACHMENT
           | GPUTextureUsage.TEXTURE_BINDING
           | GPUTextureUsage.COPY_DST
@@ -212,15 +300,24 @@ export class Renderer {
 
     const texture = device.createTexture(Object.assign(sharedDescriptor, overrides))
 
-    this.viewMap.set(texture, texture.createView())
+    this.viewMap.set(texture, texture.createView({
+      label: `${ overrides.label } view`
+    }));
 
     return texture;
 
   }
 
-  public addScene(scene: SceneInterface) {
+  /**
+   * Adds a scene to the renderer
+   * @param {SceneInterface} scene - The scene to add
+   * @returns {Renderer} The renderer instance for method chaining
+   */
+  public addScene(scene: SceneInterface): Renderer {
 
-    this.onResizeHooks.add(() => scene.onScreenResize());
+    this.onResizeHooks.add(() => {
+      scene.actor.camera.aspect = this.width / this.height;
+    });
 
     this.scenes.push(this.currentScene = scene);
 
@@ -230,10 +327,22 @@ export class Renderer {
 
   }
 
+  /**
+   * Adds a post-processing effect to the renderer
+   * @param {PostEffect} pass - The post-processing effect to add
+   */
   public addPostPass(pass: PostEffect) {
-    this.postPasses.add(pass);
+    // Check if we already have an instance of this post effect type
+    if (!this.postEffectMap.has(pass.brand)) {
+      this.postEffectMap.set(pass.brand, pass);
+      this.postPasses.add(pass);
+    }
   }
 
+  /**
+   * Main rendering loop that handles scene rendering and post-processing
+   * @param {DOMHighResTimeStamp} time - The current timestamp
+   */
   public render(time: DOMHighResTimeStamp = 0) {
 
     if ( this.currentScene === null ) return;
@@ -247,11 +356,13 @@ export class Renderer {
       0, 
       new Float32Array([
         this.info.currentFrame++,
-        0, // byte for align
         this.width,
         this.height,
         ...cam.position,
+        0, // byte for align
         ...cam.direction,
+        0, // byte for align
+        Number(this.currentScene.sun.debugCascade)
       ]),
     );
 
@@ -278,7 +389,7 @@ export class Renderer {
 
     }
 
-    requestAnimationFrame(timestamp => this.render(timestamp));
+    requestAnimationFrame(x => this.render(x));
 
     this.info.delta = Math.max(time - this.info.timestampPrev, 0);
 

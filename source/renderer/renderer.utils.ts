@@ -25,36 +25,6 @@ export const DefaultShader = {
 };
 
 export namespace functions {
-
-  export function createBaseTexture(device: GPUDevice) {
-  
-    const baseTexture = device.createTexture({
-      format: "rgba8unorm",
-      usage: GPUTextureUsage.TEXTURE_BINDING
-        | GPUTextureUsage.COPY_DST
-        | GPUTextureUsage.RENDER_ATTACHMENT,
-      size: { width: 16, height: 16, depthOrArrayLayers: 1 },
-      dimension: "2d",
-    });
-  
-    device.queue.writeTexture(
-      {
-        texture: baseTexture
-      },
-      DEFAULT_16x16,
-      {
-        bytesPerRow: 16 * Float32Array.BYTES_PER_ELEMENT,
-        rowsPerImage: 16,
-      },
-      {
-        width: baseTexture.width,
-        height: baseTexture.height,
-      },
-    );
-  
-    return baseTexture;
-  
-  }
   
   export async function createImageTexture(
     device: GPUDevice,
@@ -139,28 +109,15 @@ export namespace functions {
   
   }
     
-  export function createBaseFragmentTarget(): GPUColorTargetState {
-    return {
-      format: Renderer.RENDER_FORMAT,
-      blend: {
-        alpha: {
-          srcFactor: "src-alpha",
-          dstFactor: "one-minus-src-alpha",
-          operation: "add"
-        },
-        color: {
-          srcFactor: "src-alpha",
-          dstFactor: "one-minus-src-alpha",
-          operation: "add"
-        }
-      }
-    };
-  }
-  
   export function createBasePipeline(
     shaders: ReturnType<typeof Preprocessor.setup>,
     overrides: Partial<GPURenderPipelineDescriptor> = Object(),
     simplified: boolean = false,
+    normalTarget = true,
+    constants: Record<number, number> = {
+      0: DirectionLight.RESOLUTION,
+      1: DirectionLight.CASCADE_OFFSET,
+    },
   ): GPURenderPipeline {
   
     const vertex: GPUVertexState = {
@@ -170,11 +127,13 @@ export namespace functions {
   
     const fragment: GPUFragmentState = {
       module: shaders.fragment,
-      targets: [ createBaseFragmentTarget() ],
-      constants: {
-        0: DirectionLight.RESOLUTION,
-        1: DirectionLight.CASCADE_OFFSET,
-      }
+      targets: normalTarget ? [ 
+        { format: Renderer.RENDER_FORMAT },
+        { format: Renderer.NORMAL_FORMAT, writeMask: GPUColorWrite.RED | GPUColorWrite.GREEN | GPUColorWrite.BLUE },
+      ] : [
+        { format: Renderer.RENDER_FORMAT }
+      ],
+      constants,
     }
   
     return device.createRenderPipeline({
