@@ -3,14 +3,22 @@ import { Ortho } from "ortho"
 export const enum Axis { X, Y, Z };
 export const enum CameraView { Front, Up, Right };
 
+export type SharedObserverBuffer = { buffer: GPUBuffer, index: number };
+
+const enum MatrixSize {
+  SIDE = 4,
+  WHOLE = SIDE * SIDE,
+  DOUBLE = WHOLE * 2
+}
 
 export class Observer {
 
-  #buffer = new SharedArrayBuffer(Float32Array.BYTES_PER_ELEMENT * 12);
-
-  static BUFFER_SIZE = 4 * 4 * 2;
+  static BUFFER_SIZE = MatrixSize.DOUBLE;
   static BUFFER_TYPE = Float32Array;
   static BUFFER_STRIDE = 4 * 4 * Float32Array.BYTES_PER_ELEMENT;
+
+  #buffer = new SharedArrayBuffer(Float32Array.BYTES_PER_ELEMENT * 12);
+  #sendBuffer = new Float32Array(Observer.BUFFER_SIZE);
 
   static UP: Ortho.vec3 = [ 0, 1, 0 ];
   static FAR_POINT = 1000;
@@ -22,16 +30,19 @@ export class Observer {
   public readonly moveVector = new Float32Array(this.#buffer,Float32Array.BYTES_PER_ELEMENT * 6,3);
   public readonly position = new Float32Array(this.#buffer,Float32Array.BYTES_PER_ELEMENT * 3,3);
   public readonly target = new Float32Array(this.#buffer,0,3);
-  public projection = Ortho.mat4.create();
-  public gbuffer: GPUBuffer;
+  public projection = new Float32Array(this.#sendBuffer.buffer, 0, 16) as Ortho.mat4;
+  public gbuffer: Nullable<GPUBuffer>;
 
-  constructor(protected child?: Observer) {
-    
-    this.gbuffer = device.createBuffer({
+
+  constructor(protected child?: Observer, protected shared: Nullable<SharedObserverBuffer> = null) {
+
+    if ( shared === null ) this.gbuffer = device.createBuffer({
       label: `Observer matrixes ${ crypto.randomUUID() }`,
       size: Observer.BUFFER_TYPE.BYTES_PER_ELEMENT * Observer.BUFFER_SIZE,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
     });
+
+    else this.gbuffer = null;
 
     this.matrix[ CameraView.Front ] = [0,0,0];
     this.matrix[ CameraView.Up    ] = [0,0,0];
@@ -56,13 +67,29 @@ export class Observer {
     const ty = Ortho.vec3.dot(this.position, this.matrix[ CameraView.Up ]);
     const tz = Ortho.vec3.dot(this.position, this.matrix[ CameraView.Front ]);
 
-    device.queue.writeBuffer(this.gbuffer, 0, new Camera.BUFFER_TYPE(this.projection));
-    device.queue.writeBuffer(this.gbuffer, Observer.BUFFER_STRIDE, new Camera.BUFFER_TYPE([
+    // ? For some reason here is an array allocation over and over. 
+    // ? I shound pack all of that vectors together in one memory chunk later.
+    this.#sendBuffer.set([
       this.matrix[ CameraView.Right ][ Axis.X ], this.matrix[ CameraView.Up ][ Axis.X ], this.matrix[ CameraView.Front ][ Axis.X ], 0,
       this.matrix[ CameraView.Right ][ Axis.Y ], this.matrix[ CameraView.Up ][ Axis.Y ], this.matrix[ CameraView.Front ][ Axis.Y ], 0,
       this.matrix[ CameraView.Right ][ Axis.Z ], this.matrix[ CameraView.Up ][ Axis.Z ], this.matrix[ CameraView.Front ][ Axis.Z ], 0,
       -tx, -ty, -tz, 1,
-    ]));
+    ], MatrixSize.WHOLE);
+
+    const buffer = this.shared === null 
+      ? this.gbuffer as GPUBuffer
+      : this.shared!.buffer
+      ;
+
+    const offset = this.shared === null 
+      ? 0 
+      : device.limits.minStorageBufferOffsetAlignment * this.shared.index
+
+    device.queue.writeBuffer(
+      buffer, 
+      offset, 
+      this.#sendBuffer
+    );
 
     this.child?.update();
 
@@ -79,6 +106,7 @@ export class Camera extends Observer {
 
   public sensetivity = .1;
   public rotation = Ortho.vec2.create();
+  public hooks = new Set<(i: Camera) => void>();
 
   constructor(aspect: number) {
 
@@ -164,7 +192,7 @@ export class Camera extends Observer {
 
   public movementHandler(movement: Ortho.vec3) {
 
-    Ortho.vec3.add(this.moveVector, this.moveVector, movement.map(x => x * 0.015) as Ortho.vec3);
+    Ortho.vec3.add(this.moveVector, this.moveVector, movement);
 
     this.needsUpdate = true;
 
@@ -226,6 +254,8 @@ export class Camera extends Observer {
     if (this.needsUpdate === false) return;
 
     this.move();
+
+    for ( const x of this.hooks ) x(this);
 
     super.update();
 

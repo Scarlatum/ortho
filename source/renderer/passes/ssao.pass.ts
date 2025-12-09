@@ -1,22 +1,24 @@
 import { PostEffect } from "../../interfaces/postpass.interface";
+import { GBufferType } from "../renderer.contants";
 import { Renderer } from "../renderer.model";
 
 import shader from "../shaders/post/ssao.wgsl?raw";
+import { Downsampler } from "./attachable/downsampler.pass";
 
 export class SSAOPass extends PostEffect {
 
   // Brand identifier for this post effect
   readonly brand = Symbol("ssao");
 
+  private downsampler: Downsampler;
+
   constructor(
     private renderer: Renderer,
-    private params: { 
-      radius: number,
-      bias: number,
-      power: number
-    },
   ) {
+    
     super();
+
+    this.downsampler = new Downsampler(renderer);
 
     this.module = device.createShaderModule({
       code: shader
@@ -47,7 +49,36 @@ export class SSAOPass extends PostEffect {
   }
 
   public async pass(frame: GPUTexture) {
-    // TODO: Implement SSAO pass
+
+    const encoder = device.createCommandEncoder();
+
+    const views = { 
+      downsampled: this.downsampler.view,
+      frame: frame.createView(),
+    };
+
+    const pass = encoder.beginRenderPass({
+      colorAttachments: [{ 
+        view: views.frame, 
+        loadOp: "load", 
+        storeOp: "store"
+      }]
+    });
+
+    pass.setPipeline(this.pipeline);
+    pass.setBindGroup(0, device.createBindGroup({
+      layout: this.pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: this.renderer.gbuffers[ GBufferType.Depth ].createView() },
+        { binding: 1, resource: this.renderer.gbuffers[ GBufferType.Normal ].createView() },
+      ]
+    }))
+
+    pass.draw(6);
+    pass.end();
+
+    device.queue.submit([ encoder.finish() ]);
+
   }
 
 } 

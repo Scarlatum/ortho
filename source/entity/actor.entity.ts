@@ -1,4 +1,5 @@
 // import { SceneInterface } from "../interfaces/scene.interface";
+import { vec3 } from "gl-matrix";
 import { SceneInterface } from "../interfaces/scene.interface";
 import { Axis, Camera } from "../renderer/camera/camera.model";
 import { clampedSinEasing } from "../utils/easing.utils";
@@ -10,8 +11,7 @@ export class Actor {
   public maxSpeed = parseInt(localStorage.getItem("ortho::actor::maxSpeed") || "1");
   public acceleration = 0;
   public motionState = false;
-  public camera: Camera;
-
+  
   public buttons: Buttons = {
     "KeyW": false,
     "KeyS": false,
@@ -19,11 +19,11 @@ export class Actor {
     "KeyA": false,
   };
 
-  constructor({ renderer }: SceneInterface) {
-
-    this.camera = new Camera(renderer.width / renderer.height)
+  constructor({ renderer }: SceneInterface, public camera: Camera) {
 
     this.applyListeners(window);
+
+    this.camera.hooks.add(() => this.update());
 
   }
 
@@ -60,7 +60,7 @@ export class Actor {
 
   public update() {
 
-    this.camera.movementHandler([
+    const moveVector = [
       this.buttons[ "KeyD"  ]
         ? -this.movementSpeed : this.buttons[ "KeyA" ]
           ? this.movementSpeed : 0,
@@ -68,10 +68,15 @@ export class Actor {
         ? -this.movementSpeed : this.buttons[ "KeyW" ]
           ? this.movementSpeed : 0,
       0,
-    ]);
+    ];
 
-    this.camera.update();
+    const activeVectors = moveVector.reduce((a,c) => a + Math.abs(Math.sign(c)), 0) === 1
+      ? 1
+      : Math.SQRT2
+      ;
 
+    this.camera.movementHandler(moveVector.map(x => (x * 0.015) / activeVectors) as vec3);
+    
     if (this.motionState === false) {
       this.acceleration = Math.max(0.25, this.acceleration - 0.0075);
     }
@@ -81,15 +86,25 @@ export class Actor {
   applyListeners(target: HTMLCanvasElement | Window = window) {
 
     target.addEventListener("keydown", (e) => {
+      
       this.keyboardHandler(e as KeyboardEvent, true);
-      this.acceleration = Math.min(0.5, this.acceleration + 0.0075);
-      this.motionState = true;
-    });
+
+      if ( Object.values(this.buttons).some(x => x) ) {
+        this.acceleration = Math.min(0.5, this.acceleration + 0.0075);
+        this.motionState = true;
+      }
+
+    }, { passive: true });
 
     target.addEventListener("keyup", (e) => {
+
       this.keyboardHandler(e as KeyboardEvent, false);
-      this.motionState = false;
-    });
+
+      if ( Object.values(this.buttons).every(x => x) ) {
+        this.motionState = false;
+      }
+
+    }, { passive: true });
 
     target.addEventListener("wheel", (e) => {
       this.mouseWheelHandler(e as WheelEvent);
@@ -97,7 +112,7 @@ export class Actor {
 
     target.addEventListener("mousemove", (e) => {
       this.mouseMoveHandler(e as MouseEvent);
-    });
+    }, { passive: true });
 
     {
 

@@ -7,7 +7,7 @@ export function createReverb(audioContext: AudioContext, duration = 2.0) {
   const leftChannel = impulseResponse.getChannelData(0);
 
   for (let i = 0; i < bufferSize; i++) {
-    leftChannel[i] = Math.random();
+    leftChannel[i] = Math.random() ** 10;
   }
 
   // Create a ConvolverNode to apply the reverb

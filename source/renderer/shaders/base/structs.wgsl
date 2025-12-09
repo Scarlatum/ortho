@@ -27,6 +27,12 @@ struct Observer {
   camera        : mat4x4f,
 };
 
+struct ObserverAligned {
+  perspective: mat4x4f,
+  camera: mat4x4f,
+  @align(128) nothing: f32,
+}
+
 struct PointLight {
   visibility    : f32,
   color         : vec3f,

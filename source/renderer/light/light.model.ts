@@ -18,7 +18,7 @@ export interface ShadowParams {
 export class DirectionLight {
 
   static readonly LEVELS = Math.log2(LightCascade.Close);
-  static readonly RESOLUTION = parseInt(localStorage.getItem("ortho::shadow::resolution") || "800");
+  static readonly RESOLUTION = parseInt(localStorage.getItem("ortho::shadow::resolution") || "1024");
   static readonly CASCADE_OFFSET = 0;
   static readonly DEFAULT_CASCADE_FLAG: LightCascade = LightCascade.Distant | LightCascade.Far | LightCascade.Near | LightCascade.Close;
   static readonly shadowMapResolution = {
@@ -34,13 +34,14 @@ export class DirectionLight {
 
   public readonly texture: GPUTexture;
   public readonly observers = Array(4) as [ Observer, Observer, Observer, Observer ];
+  public readonly sharedBuffer: GPUBuffer;
 
   public needsUpdate = true;
   public debugCascade = false;
 
-  private static readonly OFFSET = parseInt(localStorage.getItem("ortho::shadow::offset") || "256");
+  private static readonly OFFSET = parseInt(localStorage.getItem("ortho::shadow::offset") || "1024");
 
-  constructor(private scene: SceneInterface) {
+  constructor(public scene: SceneInterface) {
 
     this.texture = device.createTexture({
       label     : "Shadow Map",
@@ -49,11 +50,20 @@ export class DirectionLight {
       usage     : GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     });
 
+    this.sharedBuffer = device.createBuffer({
+      label: "Shared Observer Buffer",
+      size: Float32Array.BYTES_PER_ELEMENT * device.limits.minStorageBufferOffsetAlignment * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC
+    });
+
     for ( let i = 0; i < DirectionLight.LEVELS; i++ ) {
 
       const res = 512 >> 2 * i + DirectionLight.OFFSET;
 
-      this.observers[i] = new Observer(this.observers[i - 1]);
+      this.observers[i] = new Observer(this.observers[i - 1], {
+        buffer: this.sharedBuffer,
+        index: i,
+      });
 
       Ortho.mat4.ortho(
         this.observers[i].projection,
@@ -78,32 +88,6 @@ export class DirectionLight {
   public update() {
 
     if ( this.needsUpdate === false ) return;
-
-    const time = this.scene.renderer.info.currentFrame / 10_000;
-
-    for ( let i = 0; i < this.observers.length; i++ ) {
-
-      const origin: Ortho.vec3 = [0,0,0];
-
-      const observer  = this.observers[i];
-      const offset    = (512 >> 2 * i);
-
-      Ortho.vec3.mul(origin, this.scene.actor.camera.direction, [
-        offset + this.scene.actor.camera.aspect,
-        0,
-        offset,
-      ]);
-
-      Ortho.vec3.add(origin, this.scene.actor.camera.position, origin);
-      Ortho.vec3.add(observer.position, [
-        500 * Math.sin(time),
-        500,
-        500 * Math.cos(time),
-      ], origin);
-      
-      observer.target.set(origin);
-
-    }
 
     this.head.update();
 

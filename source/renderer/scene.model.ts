@@ -1,7 +1,4 @@
-import utils from "./renderer.utils";
 import { Renderer } from "./renderer.model";
-
-import { Actor } from "../entity/actor.entity";
 
 import { Drawable } from "../interfaces/drawable.interface";
 import { SceneInterface } from "../interfaces/scene.interface";
@@ -17,6 +14,9 @@ import { PointLightRepository } from "./light/point.model";
 import { DirectionLight } from "./light/light.model";
 import { Texture } from "./texture.model";
 import { TextureContainer } from "../entity/creation.entity";
+import { DepthPass } from "./passes/depth.pass";
+import { BindgroupLabels } from "./renderer.contants";
+import { Camera } from "./camera/camera.model";
 
 export class Scene extends SceneInterface {
 
@@ -43,9 +43,10 @@ export class Scene extends SceneInterface {
   private passDescriptor = Scene.baseColorAttacment();
   private bindgroupMap = new WeakMap<Drawable, GPUBindGroup>();
   private shadowPass: ShadowPass;
+  private depthPass: DepthPass;
   private setupBindgroup: GPUBindGroup;
-
-  public override actor: Actor;
+  
+  public override camera: Camera;
   public override sun: DirectionLight;
   public override onpass = new Set<Function>();
   public override meshes = new Map<any, Mesh | InstancedMesh>();
@@ -57,6 +58,8 @@ export class Scene extends SceneInterface {
     fragments: Array<string> = [],
   ) {
 
+    if ( import.meta.env.DEV ) console.time("Scene setup");
+
     super();
 
     this.renderer.preprocessor.applyMaterials(
@@ -65,22 +68,43 @@ export class Scene extends SceneInterface {
 
     fragments.forEach(x => renderer.preprocessor.applyFragment(x));
 
-    this.pipeline = utils.createBasePipeline(Preprocessor.setup(
-      "Scene shader",
-      this.renderer.preprocessor,
-    ), {
-      label: "Scene Pipiline Test",
+    const { fragment, vertex } = Preprocessor.setup("Scene shader", this.renderer.preprocessor);
+
+
+
+    this.pipeline = device.createRenderPipeline({
+      label: "Scene Pipeline",
+      layout: this.renderer.pipelineLayout,
       primitive: {
         cullMode: "back",
       },
       multisample: { count: this.renderer.msaa },
-      layout: this.renderer.bindgroupLayout
+      depthStencil: {
+        format: Renderer.DEPTH_FORMAT,
+        depthWriteEnabled: true,
+        depthCompare: "less",
+      },
+      vertex: {
+        module: vertex,
+        buffers: [ Mesh.getVertexLayout(false) ],
+      },
+      fragment: {
+        module: fragment,
+        targets: [
+          { format: Renderer.RENDER_FORMAT },
+          { 
+            format: Renderer.NORMAL_FORMAT, 
+            writeMask: GPUColorWrite.RED | GPUColorWrite.GREEN | GPUColorWrite.BLUE 
+          },
+        ],
+      },
     });
 
     this.updateQueue.add(this.sun = new DirectionLight(this));
-    this.updateQueue.add(this.actor = new Actor(this));
+    this.updateQueue.add(this.camera = new Camera(renderer.width / renderer.height));
 
-    this.shadowPass = new ShadowPass(this);
+    this.shadowPass       = new ShadowPass(this);
+    this.depthPass        = new DepthPass(this);
     this.pointLightSource = new PointLightRepository(this);
 
     if ( Scene.LIGHT_PASS ) {
@@ -89,14 +113,16 @@ export class Scene extends SceneInterface {
 
     this.setupBindgroup = device.createBindGroup({
       label: "Scene Setup Bindgroup",
-      layout: this.pipeline.getBindGroupLayout(0),
+      layout: this.pipeline.getBindGroupLayout(BindgroupLabels.BaseGroup),
       entries: [
         { binding: 0, resource: { buffer: this.renderer.uniformBuffer } },
-        { binding: 1, resource: { buffer: this.actor.camera.gbuffer } },
+        { binding: 1, resource: { buffer: this.camera.gbuffer! } },
         { binding: 2, resource: device.createSampler(Scene.textureSamplerDescriptor) },
-        { binding: 3, resource: device.createSampler(Scene.depthSamplerDescriptor) }
+        { binding: 3, resource: device.createSampler(Scene.depthSamplerDescriptor) },
       ]
     });
+
+    if ( import.meta.env.DEV ) console.timeEnd("Scene setup");
 
   }
 
@@ -188,12 +214,13 @@ export class Scene extends SceneInterface {
 
       if ( !bindgroup ) this.bindgroupMap.set(x, bindgroup = device.createBindGroup({
         label: "Drawable Instance Bindgroup",
-        layout: this.pipeline.getBindGroupLayout(1),
+        layout: this.pipeline.getBindGroupLayout(BindgroupLabels.InstanceGroup),
         entries: [
           { binding: 0, resource: { buffer: x.buffers.tranformation } },
           { binding: 1, resource: { buffer: x.buffers.visibility } },
           { binding: 2, resource: { buffer: x.buffers.params } },
           { binding: 3, resource: x.data.texture.createView() },
+          { binding: 4, resource: this.depthPass.depthView }
         ]
       }));
   
@@ -243,14 +270,28 @@ export class Scene extends SceneInterface {
     for ( const x of this.onpass ) x();
 
     if ( Scene.SHADOW_PASS ) this.shadowPass.pass(encoder, this.drawQueue);
+
+    if ( false ) { // Depth pre pass
+      
+      if ( import.meta.env.DEV ) encoder.pushDebugGroup("Depth Pass");
+
+      this.depthPass.pass(encoder, this.drawQueue);
+
+      if ( import.meta.env.DEV ) encoder.popDebugGroup();
+
+    }
     
     { // Render pass
+
+      if ( import.meta.env.DEV ) encoder.pushDebugGroup("Renderer Pass");
 
       const desc = this.renderer.updatePassDescriptor(this.passDescriptor);
       const pass = encoder.beginRenderPass(desc);
 
       pass.executeBundles(this.bundles);
       pass.end();
+
+      if ( import.meta.env.DEV ) encoder.popDebugGroup();
 
     }
 

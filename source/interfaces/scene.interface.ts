@@ -1,9 +1,9 @@
-import { Actor } from "../entity/actor.entity";
 import { Renderer } from "../renderer/renderer.model";
 import { Drawable } from "./drawable.interface";
 import { PointLightRepository } from "../renderer/light/point.model";
 import { DirectionLight } from "../renderer/light/light.model";
 import { Mesh } from "../mesh/mesh.model";
+import { Camera } from "../renderer/camera/camera.model";
 
 interface Updatable {
   update(): void;
@@ -15,7 +15,7 @@ export abstract class SceneInterface {
   protected drawQueue = new Set<Drawable>();
   protected updateQueue = new Set<Updatable>();
 
-  abstract actor: Actor;
+  abstract camera: Camera;
   abstract sun: DirectionLight;
   abstract renderer: Renderer;
   abstract pipeline: GPURenderPipeline;

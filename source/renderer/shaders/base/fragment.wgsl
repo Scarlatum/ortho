@@ -5,6 +5,13 @@ const SHADOW_INTENSITY = 0.05;
   in: VertexOut,
 ) -> FragmentOut {
 
+  // let uv = (in.pos.xy / params.size);
+  // let depthTest = textureSampleCompare(preDepth, shadowSampler, uv, in.pos.z);
+
+  // if ( depthTest == 1.0 ) {
+  //   discard;
+  // }
+
   var result: FragmentOut;
 
   var debug_color = vec3f(1.0);
@@ -39,16 +46,16 @@ const SHADOW_INTENSITY = 0.05;
       let bounders  = ceil(saturate(space.x) % 1.0) * ceil(saturate(space.y) % 1.0);
 
       switch i {
-        case 3u: {
+        // case 3u: {
 
-          for ( var k: u32 = 0; k < 9; k++ ) {
-            let n = textureGatherCompare(light_depth, shadowSampler, space.xy + shadow_px2uv * KERNEL_3x3[k], 3 - i, space.z);
-            texel += n.x + n.y + n.z + n.y;
-          }
+        //   for ( var k: u32 = 0; k < 9; k++ ) {
+        //     let n = textureGatherCompare(light_depth, shadowSampler, space.xy + shadow_px2uv * KERNEL_3x3[k], 3 - i, space.z);
+        //     texel += n.x + n.y + n.z + n.y;
+        //   }
 
-          texel /= 36.0;
+        //   texel /= 36.0;
 
-        }
+        // }
         default: {
 
           let n = textureGatherCompare(light_depth, shadowSampler, space.xy, 3 - i, space.z);
@@ -63,13 +70,13 @@ const SHADOW_INTENSITY = 0.05;
         bounders
       );
 
-      // if ( params.debugCascade == 1.0 ) {
-      //   debug_color = mix(
-      //     debug_color,
-      //     pallete[i],
-      //     bounders
-      //   );
-      // }
+      if ( params.debugCascade == 1.0 ) {
+        debug_color = mix(
+          debug_color,
+          pallete[i],
+          bounders
+        );
+      }
 
     }
 
@@ -86,7 +93,7 @@ const SHADOW_INTENSITY = 0.05;
 
       light += p.color
         * (n * n)
-        * (saturate(dot(in.normals.xyz, p.position - in.world.xyz)) + 0.05)
+        * saturate(dot(in.normals.xyz, p.position - in.world.xyz))
         ;
       
     }

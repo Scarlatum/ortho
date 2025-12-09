@@ -31,7 +31,20 @@ type Params<S = object, I extends number = 1> = {
   shadow        : Partial<ShadowParams>,
 }
 
+/**
+ * Creates a new Creation instance with the specified parameters
+ * @param {symbol} id - The unique identifier for the creation
+ * @param {Assets} assets - The assets required for the creation
+ * @param {Params} params - The parameters for the creation
+ * @returns {Creation} A new Creation instance
+ */
 export class Creation<State, const Instances extends number = 1> {
+
+  static bufferCache= new WeakMap<Symbol, [
+    Float32Array,
+    Float32Array,
+    Float32Array,
+  ]>();
 
   static defaultParams = {
     state         : Object(),
@@ -43,19 +56,13 @@ export class Creation<State, const Instances extends number = 1> {
 
   constructor(
     id: symbol,
-    { geometry, material, texture }: Requirements, 
+    req: Requirements, 
     shadow: Partial<ShadowParams>,
     private instances: Instances,
     public state: State = Object()
   ) {
 
-    const data: MeshPayload = {
-      material  : material,
-      texture   : texture,
-      vertexes  : Wave.constructBuffer(geometry, Wave.BufferType.Vertex),
-      uv        : Wave.constructBuffer(geometry, Wave.BufferType.UV),
-      normals   : Wave.constructBuffer(geometry, Wave.BufferType.Normal),
-    };
+    const data = Creation.createMeshPayload(id, req);
 
     // ? Так как InstancesMesh наследуется от Mesh, то и в ручном касте типа тут особой потребности нет
     // ? Когда нибудь TS научиться работать с константными выражениями, но пока это лишь мои хотелки.
@@ -64,6 +71,36 @@ export class Creation<State, const Instances extends number = 1> {
       : new InstancedMesh(id, data, shadow, instances);
       ;
     
+  }
+
+  /**
+   * Creates a mesh payload object with the specified geometry, material, and texture
+   * @param {symbol} id - The unique identifier for the mesh
+   * @param {Requirements} req - The requirements for the mesh
+   * @returns {MeshPayload} The mesh payload object
+   * @throws {Error} If the texture is not provided
+  */
+  static createMeshPayload(id: symbol, { geometry, material, texture }: Requirements): MeshPayload {
+
+    let data: Partial<MeshPayload> = {
+      material,
+      texture,
+    };
+
+    if ( Creation.bufferCache.has(id) === false ) Creation.bufferCache.set(id, [
+      data.vertexes  = Wave.constructBuffer(geometry, Wave.BufferType.Vertex),
+      data.uv        = Wave.constructBuffer(geometry, Wave.BufferType.UV),
+      data.normals   = Wave.constructBuffer(geometry, Wave.BufferType.Normal),
+    ]);
+    
+    else [ 
+      data.vertexes, 
+      data.uv, 
+      data.normals 
+    ] = Creation.bufferCache.get(id)!;
+
+    return data as MeshPayload;
+
   }
 
   /**

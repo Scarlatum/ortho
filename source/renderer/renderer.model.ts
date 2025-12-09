@@ -65,7 +65,7 @@ export class Renderer {
     () => this.onScreenResize()
   ]);
 
-  public bindgroupLayout: GPUPipelineLayout;
+  public pipelineLayout: GPUPipelineLayout;
   public preprocessor = new Preprocessor(DefaultShader);
   public gbuffers = Array<GPUTexture>(3);
   public msaa = MSAA.X4;
@@ -119,11 +119,9 @@ export class Renderer {
     });
 
     { // Setup Shared Pipeline Layout
-
-      this.bindgroupLayout = device.createPipelineLayout({
+      this.pipelineLayout = device.createPipelineLayout({
         bindGroupLayouts: layouts.map(x => device.createBindGroupLayout(x))
       })
-
     }
 
     { // Setup static mesh properties
@@ -316,12 +314,12 @@ export class Renderer {
   public addScene(scene: SceneInterface): Renderer {
 
     this.onResizeHooks.add(() => {
-      scene.actor.camera.aspect = this.width / this.height;
+      scene.camera.aspect = this.width / this.height;
     });
 
     this.scenes.push(this.currentScene = scene);
 
-    scene.actor.applyListeners(this.context.canvas as HTMLCanvasElement);
+    // scene.actor.applyListeners(this.context.canvas as HTMLCanvasElement);
 
     return this;
 
@@ -349,13 +347,14 @@ export class Renderer {
 
     this.info.timestampPrev = time;
 
-    const cam = this.currentScene.actor.camera;
+    const cam = this.currentScene.camera;
 
 		device.queue.writeBuffer(
       this.uniformBuffer, 
       0, 
       new Float32Array([
         this.info.currentFrame++,
+        0, // byte for align
         this.width,
         this.height,
         ...cam.position,
