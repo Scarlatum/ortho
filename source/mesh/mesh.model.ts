@@ -149,20 +149,20 @@ export class Mesh extends Drawable {
 
   }
 
-  static indexate(x: Array<Float16Array>) {
+  // static indexate(x: Array<Float16Array>) {
 
-    const buffer = x.at(0)?.buffer;
+  //   const buffer = x.at(0)?.buffer;
 
-    if ( !buffer ) return new Uint16Array([]);
+  //   if ( !buffer ) return new Uint16Array([]);
 
-    const view = new DataView(buffer);
-    const uniq = new BigInt64Array(new Set(new BigInt64Array(buffer)));
+  //   const view = new DataView(buffer);
+  //   const uniq = new BigInt64Array(new Set(new BigInt64Array(buffer)));
 
-    return new Uint16Array(x.map(x => {
-      return uniq.indexOf(view.getBigInt64(x.byteOffset, true));	
-    }));
+  //   return new Uint16Array(x.map(x => {
+  //     return uniq.indexOf(view.getBigInt64(x.byteOffset, true));	
+  //   }));
     
-  }
+  // }
   
   static constructVertexData(
     mesh    : Mesh,
