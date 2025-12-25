@@ -19,7 +19,7 @@ export class VertexArena {
 
   public add(id: Symbol, data: Float32Array) {
 
-    device.queue.writeBuffer(this.buffer, this.offset, data);
+    device.queue.writeBuffer(this.buffer, this.offset, data.buffer);
 
     const ptr: Pointer = {
       address: this.offset,
@@ -360,7 +360,7 @@ export class Renderer {
         ...cam.position,
         0, // byte for align
         ...cam.direction,
-        0, // byte for align
+        // 0, // byte for align
         Number(this.currentScene.sun.debugCascade)
       ]),
     );
