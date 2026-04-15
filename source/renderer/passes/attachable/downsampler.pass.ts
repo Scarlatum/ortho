@@ -3,10 +3,6 @@ import { Attachable } from "../../../interfaces/attachable.interface";
 
 import downsamplerShader from "../../shaders/post/downsample.wgsl?raw";
 
-const fetchTest = await fetch(new URL("../../shaders/post/downsample.wgsl", import.meta.url));
-
-console.log(fetchTest);
-
 export class Downsampler extends Attachable {
 
   public override module ;
@@ -28,11 +24,9 @@ export class Downsampler extends Attachable {
     this.pipeline = device.createRenderPipeline({
       layout: "auto",
       vertex: {
-        entryPoint: "vertexKernel",
         module: this.module,
       },
       fragment: {
-        entryPoint: "fragmentKernel",
         module: this.module,
         targets: [ { format: Renderer.RENDER_FORMAT } ],
       },

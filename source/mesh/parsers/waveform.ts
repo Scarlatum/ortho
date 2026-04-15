@@ -190,6 +190,8 @@ export namespace Wave {
 
     }
 
+    // if ( import.meta.env.DEV ) console.count("constructBuffer");
+
     return buffer;
 
   }

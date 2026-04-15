@@ -4,6 +4,7 @@ import { permutations } from "../utils/math.utils.ts";
 import { Model } from "../utils/model.utils.ts";
 import { ShadowParams } from "../renderer/light/light.model.ts";
 import { VertexArena } from "../renderer/renderer.model.ts";
+import { WGSLAlign } from "../renderer/renderer.utils.ts";
 
 export const enum VERTEX_LAYOUT {
   ID,
@@ -29,7 +30,7 @@ export interface BoundingPoints<
 export type MeshPayload = Omit<Deref<RenderData>, "model">;
 
 export const enum VertexLayoutSize {
-  FULL = 9,
+  FULL = 8,
   REDUCED = 4,
 }
 
@@ -40,6 +41,8 @@ export class Mesh extends Drawable {
   static MAT4SIZE = 4 * 4;
 
   static arenas: { full: VertexArena, reduced: VertexArena } = Object();
+
+  static DEFAULT_VISIBILITY_BUFFER: Nullable<GPUBuffer> = null;
 
   public override readonly model: Model;
   public override vertexCount;
@@ -56,10 +59,7 @@ export class Mesh extends Drawable {
     public id = Symbol("Default mesh symbol"),
     payload: MeshPayload,
     shadow: Partial<ShadowParams>,
-    visibilityBuffer = device.createBuffer({
-      size: Uint32Array.BYTES_PER_ELEMENT * 1,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    })
+    visibilityBuffer ?: GPUBuffer,
   ) {
 
     super();
@@ -79,6 +79,7 @@ export class Mesh extends Drawable {
     { // Set GPU Buffers
   
       this.buffers.tranformation = device.createBuffer({
+        label: `Mesh ${ id.description } transform buffer`,
         size: Mesh.MAT4SIZE * Float32Array.BYTES_PER_ELEMENT,
         usage: GPUBufferUsage.VERTEX
           | GPUBufferUsage.COPY_DST
@@ -86,12 +87,17 @@ export class Mesh extends Drawable {
       });
   
       this.buffers.params = device.createBuffer({
+        label: `Mesh ${ id.description } Params buffer`,
         size: Uint32Array.BYTES_PER_ELEMENT * 3,
         usage: GPUBufferUsage.UNIFORM 
           | GPUBufferUsage.COPY_DST,
       });
-  
-      this.buffers.visibility = visibilityBuffer;
+
+      this.buffers.visibility = visibilityBuffer || ( Mesh.DEFAULT_VISIBILITY_BUFFER ||= device.createBuffer({
+        label: "Shared default visibility buffer",
+        size: Uint32Array.BYTES_PER_ELEMENT * 1,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      }));
 
     }
 
@@ -142,6 +148,21 @@ export class Mesh extends Drawable {
     }
 
   }
+
+  // static indexate(x: Array<Float16Array>) {
+
+  //   const buffer = x.at(0)?.buffer;
+
+  //   if ( !buffer ) return new Uint16Array([]);
+
+  //   const view = new DataView(buffer);
+  //   const uniq = new BigInt64Array(new Set(new BigInt64Array(buffer)));
+
+  //   return new Uint16Array(x.map(x => {
+  //     return uniq.indexOf(view.getBigInt64(x.byteOffset, true));	
+  //   }));
+    
+  // }
   
   static constructVertexData(
     mesh    : Mesh,
@@ -181,24 +202,23 @@ export class Mesh extends Drawable {
       vec3.min(min, position, min);
       vec3.max(max, position, max);
 
-      reduced[offset_reduced + 0] = full[offset_full + 0] = mesh.modelPointer;
-      reduced[offset_reduced + 1] = full[offset_full + 1] = position[0]; 
-      reduced[offset_reduced + 2] = full[offset_full + 2] = position[1]; 
-      reduced[offset_reduced + 3] = full[offset_full + 3] = position[2];
+      reduced[offset_reduced++] = full[offset_full++] = position[0]; 
+      reduced[offset_reduced++] = full[offset_full++] = position[1]; 
+      reduced[offset_reduced++] = full[offset_full++] = position[2];
 
       if ( normals ) {
-        full[offset_full + 4] = normals[v * 3 + 0]
-        full[offset_full + 5] = normals[v * 3 + 1]
-        full[offset_full + 6] = normals[v * 3 + 2]
+        full[offset_full++] = normals[v * 3 + 0]
+        full[offset_full++] = normals[v * 3 + 1]
+        full[offset_full++] = normals[v * 3 + 2]
       }
 
       if ( uv ) {
-        full[offset_full + 7] = uv?.[v * 2 + 0];
-        full[offset_full + 8] = uv?.[v * 2 + 1];
+        full[offset_full++] = uv?.[v * 2 + 0];
+        full[offset_full++] = uv?.[v * 2 + 1];
       }
 
-      offset_full += VertexLayoutSize.FULL;
-      offset_reduced += VertexLayoutSize.REDUCED;
+      // Add align bc vec3f has align of 4 in WGSL;
+      offset_reduced += 1;
 
     }
 
@@ -212,30 +232,26 @@ export class Mesh extends Drawable {
   // TODO: Make simplified layout for shadow pass w/o normals and UV
   static getVertexLayout(simplified: boolean = false): GPUVertexBufferLayout {
 
+    let loc = 0;
+
     const attributes = new Set<GPUVertexAttribute>([
-      // ? Оставляю это лишь для того, что в последствии буду батчить ститические и динамические меши вместе
-      { // Transforamtion ID
-        format: "float32",
-        offset: Float32Array.BYTES_PER_ELEMENT * 0,
-        shaderLocation: 0
-      },
       { // Vertex Data
         format: "float32x3",
-        offset: Float32Array.BYTES_PER_ELEMENT * 1,
-        shaderLocation: 1,
+        offset: Float32Array.BYTES_PER_ELEMENT * 0,
+        shaderLocation: loc++,
       },
     ]);
 
     if ( simplified === false ) {
       attributes.add({ // Normals Data
           format: "float32x3",
-          offset: Float32Array.BYTES_PER_ELEMENT * 4,
-          shaderLocation: 2,
+          offset: Float32Array.BYTES_PER_ELEMENT * 3,
+          shaderLocation: loc++,
       });
       attributes.add({ // UV data
         format: "float32x2",
-        offset: Float32Array.BYTES_PER_ELEMENT * 7,
-        shaderLocation: 3,
+        offset: Float32Array.BYTES_PER_ELEMENT * 6,
+        shaderLocation: loc++,
       });
     }
 

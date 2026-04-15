@@ -1,29 +1,18 @@
-@id(0) override SHADOW_MAP_RESOLUTION     : f32 = 1024.0;
-@id(1) override SHADOW_MAP_CASCADE_OFFSET : u32 = 0;
-
-@id(2) override FOG_DISTANCE  : f32 = 400.0;
-@id(3) override FOG_DENSITY   : f32 = 0.500;
-@id(4) override MIST_DENSITY  : f32 = 0.050;
-
 struct VertexOut {
   @builtin(position) pos: vec4f,
 };
 
 struct Observer {
-  perspective   : mat4x4f,
-  camera        : mat4x4f,
+  perspective: mat4x4f,
+  camera: mat4x4f,
 };
 
-// TODO: Make it as a struct with array and offset.
-@group(0) @binding(0) var<storage, read> view: Observer;
+@group(0) @binding(0) var<uniform> view: Observer;
 @group(0) @binding(1) var<storage, read> transforms: array<mat4x4f>;
 
 @vertex fn vertexKernel(
-
   @builtin(instance_index) instance: u32,
-
   @location(0) vertexData: vec3f,
-
 ) -> VertexOut {
 
   var result: VertexOut;

@@ -9,17 +9,29 @@ struct VertexOut {
   @location(6) directionLigthSpaceClose    : vec4f,
 };
 
+struct FragmentOut {
+  @location(0) render: vec4f,
+  @location(1) normals: vec4f,
+}
+
 struct Params {
   tick            : f32,
   size            : vec2f,
   globalPosition  : vec3f,
   lookDirection   : vec3f,
+  debugCascade    : f32,
 };
 
 struct Observer {
   perspective   : mat4x4f,
   camera        : mat4x4f,
 };
+
+struct ObserverAligned {
+  perspective: mat4x4f,
+  camera: mat4x4f,
+  @align(128) nothing: f32,
+}
 
 struct PointLight {
   visibility    : f32,

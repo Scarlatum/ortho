@@ -4,10 +4,9 @@ const uv_offset = vec2f(0.5, -0.5);
 
   @builtin(instance_index) instance: u32,
 
-  @location(0) transformationIndex: f32,
-  @location(1) vertexData: vec3f,
-  @location(2) normals: vec3f,
-  @location(3) uv: vec2f,
+  @location(0) vertexData: vec3f,
+  @location(1) normals: vec3f,
+  @location(2) uv: vec2f,
 
 ) -> VertexOut {
 

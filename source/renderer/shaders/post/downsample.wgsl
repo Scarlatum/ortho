@@ -10,7 +10,6 @@ struct VertexOut {
 
   var result: VertexOut;
 
-  // Create array fullscreen trianlge
   var vertexes = array<vec2f,6>(
     vec2f(-1.0, -1.0),
     vec2f( 1.0, -1.0),

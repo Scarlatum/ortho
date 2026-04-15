@@ -30,11 +30,12 @@ export const layouts = [
       { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
       { binding: 2, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
       { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { viewDimension: "2d", sampleType: "float" } },
+      { binding: 4, visibility: GPUShaderStage.FRAGMENT, texture: { viewDimension: "2d", sampleType: "depth", multisampled: false } },
     ]
   },
   {
     label: BindgroupLabels.ShadowMappingGroup.toString(),
-     entries: [
+    entries: [
       { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: "read-only-storage" } },
       { binding: 1, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "uniform" } },
       { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { viewDimension: "2d-array", sampleType: "depth" } },
