@@ -39,6 +39,9 @@ export class DirectionLight {
   public needsUpdate = true;
   public debugCascade = false;
 
+  // Native async disposal support
+  [Symbol.asyncDispose]: () => Promise<void>;
+
   private static readonly OFFSET = parseInt(localStorage.getItem("ortho::shadow::offset") || "1024");
 
   constructor(public scene: SceneInterface) {
@@ -78,6 +81,10 @@ export class DirectionLight {
     }
 
     this.head.update();
+
+    // Setup async disposal for GPU resources cleanup
+    const stack = new AsyncDisposableStack();
+    this[Symbol.asyncDispose] = stack.dispose.bind(stack);
 
   }
 
