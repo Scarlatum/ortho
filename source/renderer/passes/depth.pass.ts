@@ -19,9 +19,6 @@ export class DepthPass {
   public sampler: GPUSampler;
   private readonly compareType: GPUCompareFunction = "less-equal";
 
-  // Native async disposal support
-  [Symbol.asyncDispose]: () => Promise<void>;
-
   constructor(private scene: SceneInterface) {
 
     const module = device.createShaderModule({
@@ -71,10 +68,10 @@ export class DepthPass {
     this.depthTexture = depth;
     this.frameTexture = frame;
 
-    // Setup async disposal for GPU resources cleanup
-    const stack = new AsyncDisposableStack();
-    this[Symbol.asyncDispose] = stack.dispose.bind(stack);
+  }
 
+  async [ Symbol.asyncDispose ]() {
+    throw Error("TODO: THE RESOURCE CLEAN IMPL")
   }
 
   /**
