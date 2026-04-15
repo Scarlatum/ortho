@@ -20,6 +20,9 @@ export class ShadowPass {
   private lightDirectionBuffer: GPUBuffer;
   private sunViews = Array<GPUTextureView>();
 
+  // Native async disposal support
+  [Symbol.asyncDispose]: () => Promise<void>;
+
   constructor(private scene: SceneInterface) {
 
     const module = device.createShaderModule({
@@ -73,6 +76,10 @@ export class ShadowPass {
         baseArrayLayer  : DirectionLight.LEVELS - i - 1,
       });
     }
+
+    // Setup async disposal for GPU resources cleanup
+    const stack = new AsyncDisposableStack();
+    this[Symbol.asyncDispose] = stack.dispose.bind(stack);
 
   }
 

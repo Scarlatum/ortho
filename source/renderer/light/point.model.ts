@@ -106,6 +106,9 @@ export class PointLightRepository {
 
 	public bindgroup: GPUBindGroup;
 
+	// Native async disposal support
+	[Symbol.asyncDispose]: () => Promise<void>;
+
 	constructor(scene: SceneInterface) {
 		this.bindgroup = device.createBindGroup({
 			layout: scene.pipeline.getBindGroupLayout(3),
@@ -113,6 +116,10 @@ export class PointLightRepository {
 				{ binding: 0, resource: { buffer: this.buffer } }
 			]
 		});
+
+		// Setup async disposal for GPU buffer cleanup
+		const stack = new AsyncDisposableStack();
+		this[Symbol.asyncDispose] = stack.dispose.bind(stack);
 	}
 
 	public add(x: PointLight) {
