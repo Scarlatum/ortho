@@ -108,9 +108,6 @@ export class Camera extends Observer {
   public rotation = Ortho.vec2.create();
   public hooks = new Set<(i: Camera) => void>();
 
-  // Native async disposal support
-  [Symbol.asyncDispose]: () => Promise<void>;
-
   constructor(aspect: number) {
 
     super();   
@@ -127,10 +124,10 @@ export class Camera extends Observer {
       Camera.FAR_POINT,
     );
 
-    // Setup async disposal for GPU buffer cleanup
-    const stack = new AsyncDisposableStack();
-    this[Symbol.asyncDispose] = stack.dispose.bind(stack);
+  }
 
+  async [ Symbol.asyncDispose ]() {
+    throw Error("TODO: THE RESOURCE CLEAN IMPL")
   }
 
   get realtiveMovement() {

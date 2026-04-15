@@ -1,4 +1,5 @@
-import { Ortho, Renderer } from "ortho"
+import { mat4 } from "gl-matrix";
+import { Renderer } from "../renderer.model";
 import { Observer } from "../camera/camera.model";
 import { SceneInterface } from "../../interfaces/scene.interface";
 
@@ -39,9 +40,6 @@ export class DirectionLight {
   public needsUpdate = true;
   public debugCascade = false;
 
-  // Native async disposal support
-  [Symbol.asyncDispose]: () => Promise<void>;
-
   private static readonly OFFSET = parseInt(localStorage.getItem("ortho::shadow::offset") || "1024");
 
   constructor(public scene: SceneInterface) {
@@ -68,7 +66,7 @@ export class DirectionLight {
         index: i,
       });
 
-      Ortho.mat4.ortho(
+      mat4.ortho(
         this.observers[i].projection,
         -res,
         res,
@@ -82,10 +80,10 @@ export class DirectionLight {
 
     this.head.update();
 
-    // Setup async disposal for GPU resources cleanup
-    const stack = new AsyncDisposableStack();
-    this[Symbol.asyncDispose] = stack.dispose.bind(stack);
+  }
 
+  async [ Symbol.asyncDispose ]() {
+    throw Error("TODO: THE RESOURCE CLEAN IMPL")
   }
 
   get head() {

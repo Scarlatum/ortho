@@ -52,10 +52,7 @@ export class Scene extends SceneInterface {
   public override meshes = new Map<any, Mesh | InstancedMesh>();
   public override pointLightSource: PointLightRepository;
 
-  // Native async disposal support via Symbol.asyncDispose
-  [Symbol.asyncDispose]: () => Promise<void>;
-
-  #asyncDS = new AsyncDisposableStack();
+  private asyncDS = new AsyncDisposableStack();
 
   constructor(
     public renderer: Renderer,
@@ -106,12 +103,12 @@ export class Scene extends SceneInterface {
     });
 
     // Register disposables using .use() pattern
-    this.updateQueue.add(this.sun = this.#asyncDS.use(new DirectionLight(this)));
-    this.updateQueue.add(this.camera = this.#asyncDS.use(new Camera(renderer.width / renderer.height)));
+    this.updateQueue.add(this.sun = this.asyncDS.use(new DirectionLight(this)));
+    this.updateQueue.add(this.camera = this.asyncDS.use(new Camera(renderer.width / renderer.height)));
 
-    this.shadowPass       = this.#asyncDS.use(new ShadowPass(this));
-    this.depthPass        = this.#asyncDS.use(new DepthPass(this));
-    this.pointLightSource = this.#asyncDS.use(new PointLightRepository(this));
+    this.shadowPass       = this.asyncDS.use(new ShadowPass(this));
+    this.depthPass        = this.asyncDS.use(new DepthPass(this));
+    this.pointLightSource = this.asyncDS.use(new PointLightRepository(this));
 
     if ( Scene.LIGHT_PASS ) {
       this.updateQueue.add(this.pointLightSource);
@@ -130,22 +127,10 @@ export class Scene extends SceneInterface {
 
     if ( import.meta.env.DEV ) console.timeEnd("Scene setup");
 
-    // Adopt cleanup callbacks for GPU resources
-    this.#asyncDS.adopt(async () => {
-      // Clear collections
-      this.bindgroupMap = new WeakMap<Drawable, GPUBindGroup>();
-      this.bundles.clear();
-      this.drawQueue.clear();
-      this.updateQueue.clear();
-      this.onpass.clear();
-      this.meshes.clear();
-    });
+  }
 
-    // Assign native async dispose method
-    this[Symbol.asyncDispose] = async () => {
-      await this.#asyncDS.disposeAsync();
-    };
-
+  async [ Symbol.asyncDispose ]() {
+    await this.asyncDS.disposeAsync();
   }
 
   /**
