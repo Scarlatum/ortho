@@ -15,11 +15,11 @@ struct FragmentOut {
 }
 
 struct Params {
-  tick            : f32,
   size            : vec2f,
+  tick            : f32,
+  debugCascade    : f32,
   globalPosition  : vec3f,
   lookDirection   : vec3f,
-  debugCascade    : f32,
 };
 
 struct Observer {

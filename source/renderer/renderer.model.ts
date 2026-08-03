@@ -353,15 +353,12 @@ export class Renderer {
       this.uniformBuffer, 
       0, 
       new Float32Array([
-        this.info.currentFrame++,
-        0, // byte for align
         this.width,
-        this.height,
+        this.height,	
+        this.info.currentFrame++,
+        Number(this.currentScene.sun.debugCascade),
         ...cam.position,
-        0, // byte for align
         ...cam.direction,
-        // 0, // byte for align
-        Number(this.currentScene.sun.debugCascade)
       ]),
     );
 
