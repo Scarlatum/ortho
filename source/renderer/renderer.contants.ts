@@ -47,4 +47,4 @@ export const layouts = [
       { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: "read-only-storage" } }
     ]
   },
-] as const satisfies ReadonlyArray<GPUBindGroupLayoutDescriptor>;
+] satisfies Array<GPUBindGroupLayoutDescriptor>;
