@@ -70,8 +70,6 @@ export class Scene extends SceneInterface {
 
     const { fragment, vertex } = Preprocessor.setup("Scene shader", this.renderer.preprocessor);
 
-
-
     this.pipeline = device.createRenderPipeline({
       label: "Scene Pipeline",
       layout: this.renderer.pipelineLayout,
@@ -144,7 +142,7 @@ export class Scene extends SceneInterface {
           view: Object(),
           loadOp: "clear",
           storeOp: "store",
-          clearValue: [ 1, 1, 1, 1 ],
+          clearValue: [ 0.95,0.95,1.0,1 ],
         },
         {
           view: Object(),

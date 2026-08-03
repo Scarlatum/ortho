@@ -11,7 +11,7 @@ struct VertexOut {
 
   var result: VertexOut;
 
-  // Create array fullscreen trianlge
+  // Fullscreen quad
   var vertexes = array<vec3f,6>(
     vec3f(-1.0, -1.0, 0.0),
     vec3f( 1.0, -1.0, 0.0),
@@ -31,27 +31,32 @@ struct VertexOut {
   in: VertexOut
 ) -> @location(0) vec4<f32> {
 
-  let r = vec4f(1.0,0.5,0.5,1.0);
-  let t = textureLoad(norms, vec2i(in.pos.xy), 0);
-  let s = textureLoad(depth, vec2i(in.pos.xy), 0);
+  let r = vec3f(0.5,0.0,1.0);
+  let p = vec2i(in.pos.xy);
+
+  let n = textureLoad(norms, p, 0);
+  let d = textureLoad(depth, p, 0);
 
   var v = 0.0;
+  var o = 0.0;
 
-  for ( var x: i32 = 0; x < 3; x++ ) {
-    for ( var y: i32 = 0; y < 3; y++ ) {
+  for ( var x = 0; x < 3; x++ ) {
+    for ( var y = 0; y < 3; y++ ) {
 
-      let c = vec2i(in.pos.xy) + vec2i((x - 3) * 2, (y - 3) * 2);
+      let a = textureLoad(norms, p + vec2i(x,y) + vec2i(-1,-1), 0);
+      let b = textureLoad(depth, p + vec2i(x,y) + vec2i(-1,-1), 0);
 
-      let n = textureLoad(norms, c, 0);
-      let d = textureLoad(depth, c, 0);
-
-      v += distance(t, n);
+      v += distance(a,n);
+      o += distance(b,d);
 
     }
   }
 
   v /= 3 * 3;
+  o /= 3 * 3;
 
-  return mix(r, vec4f(0.0), v);
+  v *= pow(o, 0.5);
+
+  return vec4f(mix(r, vec3f(0.1), v), 1.0);
 
 }

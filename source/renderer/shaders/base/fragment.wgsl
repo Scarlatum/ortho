@@ -1,4 +1,4 @@
-const SHADOW_INTENSITY = 0.05;
+const SHADOW_INTENSITY = 0.15;
 
 @fragment fn fragmentKernel(
   @builtin(front_facing) face: bool,
@@ -8,8 +8,8 @@ const SHADOW_INTENSITY = 0.05;
   // let uv = (in.pos.xy / params.size);
   // let depthTest = textureSampleCompare(preDepth, shadowSampler, uv, in.pos.z);
 
-  // if ( depthTest == 1.0 ) {
-  //   discard;
+// if ( depthTest == 1.0 ) {
+//   discard;
   // }
 
   var result: FragmentOut;
@@ -22,7 +22,7 @@ const SHADOW_INTENSITY = 0.05;
   let dist  = distance(in.world.xyz, params.globalPosition.xyz);
 
   let nrml  = dot(in.normals.xyz, light_direction);
-  let ambt  = vec3f(1.0);
+  let ambt  = vec3f(0.95,0.95,1.0);
 
   let shadow_offset = clamp(-0.001 * tan(asin(nrml)), 0.0, 1.0);
   let shadow_px2uv = 1.0 / SHADOW_MAP_RESOLUTION;
@@ -46,16 +46,16 @@ const SHADOW_INTENSITY = 0.05;
       let bounders  = ceil(saturate(space.x) % 1.0) * ceil(saturate(space.y) % 1.0);
 
       switch i {
-        // case 3u: {
+        case 3u: {
 
-        //   for ( var k: u32 = 0; k < 9; k++ ) {
-        //     let n = textureGatherCompare(light_depth, shadowSampler, space.xy + shadow_px2uv * KERNEL_3x3[k], 3 - i, space.z);
-        //     texel += n.x + n.y + n.z + n.y;
-        //   }
+          for ( var k: u32 = 0; k < 9; k++ ) {
+            let n = textureGatherCompare(light_depth, shadowSampler, space.xy + shadow_px2uv * KERNEL_3x3[k], 3 - i, space.z);
+            texel += n.x + n.y + n.z + n.y;
+          }
 
-        //   texel /= 36.0;
+          texel /= 36.0;
 
-        // }
+        }
         default: {
 
           let n = textureGatherCompare(light_depth, shadowSampler, space.xy, 3 - i, space.z);
@@ -100,6 +100,10 @@ const SHADOW_INTENSITY = 0.05;
 
   }
 
+  var shadow    = visibility * SHADOW_INTENSITY * saturate(nrml);
+  let dark      = saturate(nrml * -SHADOW_INTENSITY);
+  let intencity = toGrayscale(light);
+
   switch instanceParams.materialID {
 
     @include(material);
@@ -109,10 +113,6 @@ const SHADOW_INTENSITY = 0.05;
     }
 
   }
-
-  let shadow    = visibility * SHADOW_INTENSITY * saturate(nrml);
-  let dark      = saturate(nrml * -SHADOW_INTENSITY);
-  let intencity = toGrayscale(light);
 
   color  = saturate(color - shadow - dark);
   color += light;

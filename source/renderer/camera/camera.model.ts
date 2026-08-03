@@ -33,7 +33,6 @@ export class Observer {
   public projection = new Float32Array(this.#sendBuffer.buffer, 0, 16) as Ortho.mat4;
   public gbuffer: Nullable<GPUBuffer>;
 
-
   constructor(protected child?: Observer, protected shared: Nullable<SharedObserverBuffer> = null) {
 
     if ( shared === null ) this.gbuffer = device.createBuffer({
