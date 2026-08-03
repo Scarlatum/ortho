@@ -70,6 +70,10 @@ export class DepthPass {
 
   }
 
+  async [ Symbol.asyncDispose ]() {
+    throw Error("TODO: THE RESOURCE CLEAN IMPL")
+  }
+
   /**
     * Get already constructed depth texture view, or if not, create it
     * @returns {GPUTextureView} - The depth texture view

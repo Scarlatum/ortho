@@ -1,4 +1,5 @@
-import { Ortho, Renderer } from "ortho"
+import { mat4 } from "gl-matrix";
+import { Renderer } from "../renderer.model";
 import { Observer } from "../camera/camera.model";
 import { SceneInterface } from "../../interfaces/scene.interface";
 
@@ -65,7 +66,7 @@ export class DirectionLight {
         index: i,
       });
 
-      Ortho.mat4.ortho(
+      mat4.ortho(
         this.observers[i].projection,
         -res,
         res,
@@ -79,6 +80,10 @@ export class DirectionLight {
 
     this.head.update();
 
+  }
+
+  async [ Symbol.asyncDispose ]() {
+    throw Error("TODO: THE RESOURCE CLEAN IMPL")
   }
 
   get head() {

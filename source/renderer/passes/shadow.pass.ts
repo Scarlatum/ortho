@@ -76,6 +76,10 @@ export class ShadowPass {
 
   }
 
+  async [ Symbol.asyncDispose ]() {
+    throw Error("TODO: THE RESOURCE CLEAN IMPL")
+  }
+
   private createBundle(x: Drawable) {
 
     const bundles   = Array<GPURenderBundle>(DirectionLight.LEVELS);

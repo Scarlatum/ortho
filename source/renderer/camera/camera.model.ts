@@ -125,6 +125,10 @@ export class Camera extends Observer {
 
   }
 
+  async [ Symbol.asyncDispose ]() {
+    throw Error("TODO: THE RESOURCE CLEAN IMPL")
+  }
+
   get realtiveMovement() {
 
     let transition = [ 0, 0, 0 ] as Ortho.vec3;

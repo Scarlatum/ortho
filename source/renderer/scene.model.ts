@@ -52,6 +52,8 @@ export class Scene extends SceneInterface {
   public override meshes = new Map<any, Mesh | InstancedMesh>();
   public override pointLightSource: PointLightRepository;
 
+  private asyncDS = new AsyncDisposableStack();
+
   constructor(
     public renderer: Renderer,
     materials: Array<ProceduredMaterial> = [],
@@ -98,12 +100,13 @@ export class Scene extends SceneInterface {
       },
     });
 
-    this.updateQueue.add(this.sun = new DirectionLight(this));
-    this.updateQueue.add(this.camera = new Camera(renderer.width / renderer.height));
+    // Register disposables using .use() pattern
+    this.updateQueue.add(this.sun = this.asyncDS.use(new DirectionLight(this)));
+    this.updateQueue.add(this.camera = this.asyncDS.use(new Camera(renderer.width / renderer.height)));
 
-    this.shadowPass       = new ShadowPass(this);
-    this.depthPass        = new DepthPass(this);
-    this.pointLightSource = new PointLightRepository(this);
+    this.shadowPass       = this.asyncDS.use(new ShadowPass(this));
+    this.depthPass        = this.asyncDS.use(new DepthPass(this));
+    this.pointLightSource = this.asyncDS.use(new PointLightRepository(this));
 
     if ( Scene.LIGHT_PASS ) {
       this.updateQueue.add(this.pointLightSource);
@@ -122,6 +125,10 @@ export class Scene extends SceneInterface {
 
     if ( import.meta.env.DEV ) console.timeEnd("Scene setup");
 
+  }
+
+  async [ Symbol.asyncDispose ]() {
+    await this.asyncDS.disposeAsync();
   }
 
   /**
@@ -255,6 +262,38 @@ export class Scene extends SceneInterface {
     this.bundles.add(this.createBundle(x));
     this.drawQueue.add(x);
 
+  }
+
+  /**
+   * Removes a drawable object from the scene and cleans up its bindgroup
+   * Note: WeakMap automatically garbage collects entries when keys are dereferenced,
+   * but this method helps with explicit cleanup
+   * @param {Drawable} x - The drawable object to remove
+   * @returns {boolean} True if the object was found and removed, false otherwise
+   */
+  public remove(x: Drawable): boolean {
+    
+    // Remove from draw queue
+    const removedFromDraw = this.drawQueue.delete(x);
+    
+    // Remove from bundles (need to recreate bundles without this object)
+    // Since bundles is a Set<GPURenderBundle>, we need to track which bundle belongs to which drawable
+    // For now, we clear and rebuild bundles excluding the removed object
+    if (removedFromDraw) {
+      // Rebuild bundles excluding the removed object
+      const newBundles = new Set<GPURenderBundle>();
+      for (const drawable of this.drawQueue) {
+        newBundles.add(this.createBundle(drawable));
+      }
+      this.bundles = newBundles;
+      
+      // The WeakMap entry will be automatically garbage collected when x is dereferenced
+      // No explicit deletion needed for WeakMap
+      
+      return true;
+    }
+    
+    return false;
   }
 
   /**

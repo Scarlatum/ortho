@@ -115,6 +115,10 @@ export class PointLightRepository {
 		});
 	}
 
+	async [ Symbol.asyncDispose ]() {
+    throw Error("TODO: THE RESOURCE CLEAN IMPL")
+  }
+
 	public add(x: PointLight) {
 
 		this.lights.add(x);
