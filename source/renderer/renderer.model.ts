@@ -77,7 +77,7 @@ export class Renderer {
   constructor(
     public device: GPUDevice,
     public context: GPUCanvasContext,
-    public vertexArenaSize: number = 80_000,
+    public vertexArenaSize: number = 120_000,
   ) {
 
     context.configure({
